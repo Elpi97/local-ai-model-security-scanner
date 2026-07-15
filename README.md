@@ -90,6 +90,8 @@ pytest
 - Static Tier 1 is best-effort.
 - Hash/HF LFS match ≠ absence of semantic backdoors.
 - Runtime behavior testing under **vLLM** is done with the AI dept after file clearance (Ollama probes deferred).
+- Pickle/ONNX/zip-pickle deep reads cap at **512 MiB** by default (`--max-read-bytes`; `0` = unlimited).
+- Directory scans skip symlinks and paths that escape the scan root.
 
 ## License
 

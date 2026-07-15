@@ -202,5 +202,204 @@ class TestHelperPredicates(unittest.TestCase):
         self.assertFalse(ms._module_is_or_under("torchevil", "torch"))
 
 
+class TestSizeCaps(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmpdir.name)
+
+    def tearDown(self) -> None:
+        self._tmpdir.cleanup()
+
+    def test_oversize_pickle_is_review_without_deep_scan(self) -> None:
+        path = self.tmp / "big.pkl"
+        # Dangerous payload would be DANGEROUS if scanned; size cap must skip it.
+        path.write_bytes(b"cos\nsystem\n(S'id'\ntR." + b"\x00" * 100)
+        result = ms.scan_file(
+            path, verbose=False, allow_modules=frozenset(), max_read_bytes=32
+        )
+        self.assertEqual(result.verdict, "REVIEW")
+        self.assertTrue(any("max-read-bytes" in f.detail for f in result.findings))
+        self.assertFalse(any(f.severity == "CRITICAL" for f in result.findings))
+
+    def test_oversize_onnx_is_review(self) -> None:
+        path = self.tmp / "big.onnx"
+        path.write_bytes(b"ONNX" + b"\x00" * 200)
+        result = ms.scan_file(
+            path, verbose=False, allow_modules=frozenset(), max_read_bytes=64
+        )
+        self.assertEqual(result.format, "onnx")
+        self.assertEqual(result.verdict, "REVIEW")
+        self.assertTrue(any("max-read-bytes" in f.detail for f in result.findings))
+
+    def test_oversize_zip_pickle_member_is_review(self) -> None:
+        path = self.tmp / "big.pt"
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("archive/data.pkl", b"x" * 500)
+        result = ms.scan_file(
+            path, verbose=False, allow_modules=frozenset(), max_read_bytes=100
+        )
+        self.assertEqual(result.format, "pytorch-zip")
+        self.assertEqual(result.verdict, "REVIEW")
+        self.assertTrue(any("max-read-bytes" in f.detail for f in result.findings))
+
+    def test_max_read_bytes_zero_is_unlimited(self) -> None:
+        path = self.tmp / "ok.pkl"
+        path.write_bytes(pickle.dumps({"ok": True}))
+        result = ms.scan_file(
+            path, verbose=False, allow_modules=frozenset(), max_read_bytes=0
+        )
+        self.assertEqual(result.verdict, "SAFE")
+
+
+class TestCollectFilesSymlinks(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmpdir.name)
+
+    def tearDown(self) -> None:
+        self._tmpdir.cleanup()
+
+    def test_rejects_symlink_outside_scan_root(self) -> None:
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        escape_target = outside / "escaped.pkl"
+        escape_target.write_bytes(pickle.dumps(1))
+
+        scan_root = self.tmp / "incoming"
+        scan_root.mkdir()
+        (scan_root / "legit.pkl").write_bytes(pickle.dumps({"ok": True}))
+        link = scan_root / "link.pkl"
+        try:
+            link.symlink_to(escape_target)
+        except OSError:
+            self.skipTest("symlinks not supported on this platform/filesystem")
+
+        names = {p.name for p in ms.collect_files(scan_root)}
+        self.assertEqual(names, {"legit.pkl"})
+        self.assertNotIn("link.pkl", names)
+
+    def test_collects_nested_real_files(self) -> None:
+        nest = self.tmp / "a" / "b"
+        nest.mkdir(parents=True)
+        (nest / "w.safetensors").write_bytes(b"\x00" * 8)
+        (self.tmp / "top.pt").write_bytes(pickle.dumps(1))
+        names = {p.name for p in ms.collect_files(self.tmp)}
+        self.assertEqual(names, {"w.safetensors", "top.pt"})
+
+
+class TestSniffAndFormatEdges(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmpdir.name)
+
+    def tearDown(self) -> None:
+        self._tmpdir.cleanup()
+
+    def test_empty_file_does_not_crash(self) -> None:
+        path = self.tmp / "empty.bin"
+        path.write_bytes(b"")
+        result = ms.scan_file(path, verbose=False, allow_modules=frozenset())
+        self.assertIn(result.verdict, {"SAFE", "REVIEW"})
+
+    def test_bad_zip_file_is_review(self) -> None:
+        path = self.tmp / "bad.pt"
+        path.write_bytes(b"PK\x03\x04" + b"not-a-real-zip")
+        result = ms.scan_file(path, verbose=False, allow_modules=frozenset())
+        self.assertEqual(result.format, "pytorch-zip")
+        self.assertEqual(result.verdict, "REVIEW")
+        self.assertTrue(any("zip archive" in f.detail.lower() for f in result.findings))
+
+    def test_gguf_truncated_after_magic(self) -> None:
+        path = self.tmp / "trunc.gguf"
+        path.write_bytes(b"GGUF")
+        result = ms.scan_file(path, verbose=False, allow_modules=frozenset())
+        self.assertEqual(result.format, "gguf")
+        self.assertEqual(result.verdict, "DANGEROUS")
+        self.assertTrue(
+            any("truncated" in f.detail.lower() for f in result.findings if f.severity == "CRITICAL")
+        )
+
+    def test_empty_pickle_stream_is_safe(self) -> None:
+        result = _scan_bytes(b"")
+        # Empty stream: genops yields nothing or REVIEW on error — must not crash.
+        self.assertIn(result.verdict, {"SAFE", "REVIEW"})
+
+
+class TestCliSmoke(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmpdir.name)
+
+    def tearDown(self) -> None:
+        self._tmpdir.cleanup()
+
+    def test_cli_safe_exit_zero_with_reports(self) -> None:
+        from unittest import mock
+
+        path = self.tmp / "safe.pkl"
+        path.write_bytes(pickle.dumps({"ok": True}))
+        report = self.tmp / "out.json"
+        doc = self.tmp / "out.md"
+        with mock.patch(
+            "sys.argv",
+            [
+                "model_scanner",
+                str(path),
+                "--report",
+                str(report),
+                "--doc-report",
+                str(doc),
+            ],
+        ):
+            code = ms.cli()
+        self.assertEqual(code, 0)
+        payload = json.loads(report.read_text())
+        self.assertEqual(payload[0]["verdict"], "SAFE")
+        self.assertIn("Overall verdict", doc.read_text())
+
+    def test_cli_review_strict_exits_one(self) -> None:
+        from unittest import mock
+
+        allow = self.tmp / "allow.json"
+        allow.write_text(json.dumps({"publishers": [{"id": "google"}]}))
+        path = self.tmp / "safe.pkl"
+        path.write_bytes(pickle.dumps(1))
+        with mock.patch(
+            "sys.argv",
+            [
+                "model_scanner",
+                str(path),
+                "--publisher",
+                "sketchy",
+                "--allowlist",
+                str(allow),
+                "--strict",
+            ],
+        ):
+            code = ms.cli()
+        self.assertEqual(code, 1)
+
+    def test_cli_invalid_hf_repo_exits_two(self) -> None:
+        from unittest import mock
+
+        path = self.tmp / "safe.pkl"
+        path.write_bytes(pickle.dumps(1))
+        with mock.patch(
+            "sys.argv",
+            ["model_scanner", str(path), "--hf-repo", "../evil"],
+        ):
+            code = ms.cli()
+        self.assertEqual(code, 2)
+
+    def test_cli_dangerous_exits_one(self) -> None:
+        from unittest import mock
+
+        path = self.tmp / "evil.pkl"
+        path.write_bytes(b"cos\nsystem\n(S'id'\ntR.")
+        with mock.patch("sys.argv", ["model_scanner", str(path)]):
+            code = ms.cli()
+        self.assertEqual(code, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

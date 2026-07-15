@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
@@ -10,6 +11,12 @@ from pathlib import Path
 from typing import Any, Optional
 
 _DEFAULT_ALLOWLIST = Path(__file__).resolve().parent / "config" / "publishers.allowlist.json"
+
+# Hugging Face model ids are ORG/NAME with a constrained character set.
+_HF_REPO_ID_RE = re.compile(
+    r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?/"
+    r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+)
 
 
 @dataclass
@@ -24,6 +31,11 @@ class Provenance:
     hf: Optional[dict[str, Any]] = None
     distribution: Optional[str] = None  # e.g. huggingface
     serving_runtime: Optional[str] = None  # e.g. vllm
+
+
+def validate_hf_repo_id(repo_id: str) -> bool:
+    """Return True if repo_id looks like a safe Hugging Face ORG/NAME id."""
+    return bool(repo_id) and bool(_HF_REPO_ID_RE.fullmatch(repo_id.strip()))
 
 
 def load_allowlist(path: Optional[Path] = None) -> dict[str, str]:
@@ -53,31 +65,67 @@ def load_manifest(path: Path) -> dict[str, Any]:
     return data
 
 
+def _append_digest(expected: list[str], digest: Any) -> None:
+    if isinstance(digest, str) and digest.strip():
+        expected.append(digest.lower().strip())
+    elif isinstance(digest, dict) and "sha256" in digest:
+        expected.append(str(digest["sha256"]).lower().strip())
+
+
 def expected_hashes_for_file(
     path: Path,
     cli_expected: list[str],
     manifest: Optional[dict[str, Any]],
-) -> list[str]:
-    """Collect expected digests from CLI and manifest file entries."""
+    scan_root: Optional[Path] = None,
+) -> tuple[list[str], bool]:
+    """Collect expected digests from CLI and manifest file entries.
+
+    Returns ``(digests, basename_only_match)``. Prefer exact relative path keys
+    under ``scan_root``. A key that is only the basename still applies the digest
+    for compatibility but sets ``basename_only_match`` so callers can REVIEW.
+    """
     expected = [h.lower().strip() for h in cli_expected if h and h.strip()]
+    basename_only = False
     if not manifest:
-        return list(dict.fromkeys(expected))
+        return list(dict.fromkeys(expected)), False
     files = manifest.get("files", {})
-    if isinstance(files, dict):
-        name = path.name
-        resolved = str(path)
+    if not isinstance(files, dict):
+        return list(dict.fromkeys(expected)), False
+
+    name = path.name
+    resolved = str(path.resolve()) if path.exists() else str(path)
+    rel: Optional[str] = None
+    if scan_root is not None:
+        try:
+            rel = path.resolve().relative_to(scan_root.resolve()).as_posix()
+        except ValueError:
+            try:
+                rel = path.relative_to(scan_root).as_posix()
+            except ValueError:
+                rel = None
+
+    exact_matched = False
+    for key, digest in files.items():
+        key_s = str(key).replace("\\", "/")
+        if key_s == resolved or (rel is not None and key_s == rel) or key_s == str(path):
+            _append_digest(expected, digest)
+            exact_matched = True
+
+    if not exact_matched:
         for key, digest in files.items():
-            key_s = str(key)
-            if key_s == name or key_s == resolved or Path(key_s).name == name:
-                if isinstance(digest, str) and digest.strip():
-                    expected.append(digest.lower().strip())
-                elif isinstance(digest, dict) and "sha256" in digest:
-                    expected.append(str(digest["sha256"]).lower().strip())
-    return list(dict.fromkeys(expected))
+            key_s = str(key).replace("\\", "/")
+            # Basename-tier only when the key itself is a bare filename.
+            if "/" not in key_s and key_s == name:
+                _append_digest(expected, digest)
+                basename_only = True
+
+    return list(dict.fromkeys(expected)), basename_only
 
 
 def fetch_hf_metadata(repo_id: str, timeout: float = 15.0) -> dict[str, Any]:
     """Fetch public model metadata from the Hugging Face Hub API."""
+    if not validate_hf_repo_id(repo_id):
+        raise ValueError(f"Invalid Hugging Face repo id: {repo_id!r}")
     url = f"https://huggingface.co/api/models/{repo_id}"
     req = urllib.request.Request(url, headers={"User-Agent": "model-scanner/0.2"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -224,7 +272,14 @@ def build_provenance(
                     f"SHA256 does not match Hugging Face sibling '{sib_name}'. "
                     "Possible weight swap vs the Hub revision you intended.",
                 )
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError, OSError) as e:
+        except (
+            urllib.error.URLError,
+            urllib.error.HTTPError,
+            TimeoutError,
+            json.JSONDecodeError,
+            OSError,
+            ValueError,
+        ) as e:
             result.add(
                 "REVIEW",
                 f"Hugging Face metadata unreachable for '{hf_repo}': {e}. "

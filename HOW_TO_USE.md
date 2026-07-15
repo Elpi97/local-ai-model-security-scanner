@@ -63,13 +63,20 @@ Scan the **directory** so every safetensors shard / checkpoint is covered.
 
 | Flag | Purpose |
 |---|---|
-| `--hf-repo ORG/NAME` | Hub metadata + LFS sibling SHA256 compare |
+| `--hf-repo ORG/NAME` | Hub metadata + LFS sibling SHA256 compare (must be `ORG/NAME`) |
 | `--serving-runtime vllm` | Default — records intended AI-dept runtime |
 | `--publisher ID` | Must be allowlisted or REVIEW |
 | `--expected-sha256 HEX` | Explicit digest; mismatch → DANGEROUS |
-| `--manifest PATH.json` | Multi-file digest map |
+| `--manifest PATH.json` | Multi-file digest map (prefer relative keys under the scan root) |
+| `--max-read-bytes N` | Cap full-memory reads for pickle/ONNX/zip members (default 512 MiB; `0` = unlimited) |
 | `--doc-report OUT.md` | Audit / handoff Markdown |
 | `--report OUT.json` | Machine-readable archive |
+
+### Path / size notes
+
+- Directory scans **do not follow symlinks** and only include files that resolve under the scan root.
+- Manifest `files` keys should be **relative paths** (e.g. `subdir/weights.pkl`). A bare basename still matches for compatibility but adds a **REVIEW** finding.
+- Oversize pickle/ONNX/zip-pickle members are marked **REVIEW** and deep-scanned is skipped (raise `--max-read-bytes` or use `0` if you must scan huge artifacts).
 
 ### Modules
 

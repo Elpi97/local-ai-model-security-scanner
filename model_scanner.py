@@ -32,6 +32,10 @@ from typing import Any, Optional
 import behavior as behavior_mod
 import trust as trust_mod
 
+# Cap for formats that currently slur whole files / zip members into memory.
+# 0 via CLI means unlimited. Safetensors/GGUF use header-only reads and are uncapped here.
+DEFAULT_MAX_READ_BYTES: int = 512 * 1024 * 1024
+
 
 DANGEROUS_MODULES: frozenset[str] = frozenset([
     "os", "nt", "posix", "subprocess", "sys", "socket", "shutil",
@@ -226,13 +230,40 @@ def scan_pickle_bytes(data: bytes, result: ScanResult, verbose: bool,
         )
 
 
-def scan_pickle_file(path: Path, result: ScanResult, verbose: bool, allow_modules: frozenset[str]) -> None:
+def _exceeds_max_read(size: int, max_read_bytes: int) -> bool:
+    """True when size is over the cap. max_read_bytes <= 0 means unlimited."""
+    if max_read_bytes <= 0:
+        return False
+    return size > max_read_bytes
+
+
+def scan_pickle_file(
+    path: Path,
+    result: ScanResult,
+    verbose: bool,
+    allow_modules: frozenset[str],
+    max_read_bytes: int = DEFAULT_MAX_READ_BYTES,
+) -> None:
+    size = path.stat().st_size
+    if _exceeds_max_read(size, max_read_bytes):
+        result.add(
+            "REVIEW",
+            f"Pickle file size {size:,} bytes exceeds max-read-bytes "
+            f"({max_read_bytes:,}); deep scan skipped to avoid memory exhaustion.",
+        )
+        return
     with open(path, "rb") as f:
         data = f.read()
     scan_pickle_bytes(data, result, verbose, allow_modules)
 
 
-def scan_pytorch_zip(path: Path, result: ScanResult, verbose: bool, allow_modules: frozenset[str]) -> None:
+def scan_pytorch_zip(
+    path: Path,
+    result: ScanResult,
+    verbose: bool,
+    allow_modules: frozenset[str],
+    max_read_bytes: int = DEFAULT_MAX_READ_BYTES,
+) -> None:
     try:
         with zipfile.ZipFile(path) as zf:
             names = zf.namelist()
@@ -244,6 +275,14 @@ def scan_pytorch_zip(path: Path, result: ScanResult, verbose: bool, allow_module
                 )
                 return
             for member in pkl_mems:
+                info = zf.getinfo(member)
+                if _exceeds_max_read(info.file_size, max_read_bytes):
+                    result.add(
+                        "REVIEW",
+                        f"[{member}] Zip pickle member size {info.file_size:,} bytes exceeds "
+                        f"max-read-bytes ({max_read_bytes:,}); deep scan skipped.",
+                    )
+                    continue
                 data = zf.read(member)
                 scan_pickle_bytes(data, result, verbose, allow_modules, label=member)
             for n in names:
@@ -321,7 +360,19 @@ def scan_gguf(path: Path, result: ScanResult) -> None:
     result.findings.append(Finding("INFO", f"GGUF OK (version={version}, tensors~{tensor_count}, kv~{kv_count})."))
 
 
-def scan_onnx(path: Path, result: ScanResult) -> None:
+def scan_onnx(
+    path: Path,
+    result: ScanResult,
+    max_read_bytes: int = DEFAULT_MAX_READ_BYTES,
+) -> None:
+    size = path.stat().st_size
+    if _exceeds_max_read(size, max_read_bytes):
+        result.add(
+            "REVIEW",
+            f"ONNX file size {size:,} bytes exceeds max-read-bytes "
+            f"({max_read_bytes:,}); deep scan skipped to avoid memory exhaustion.",
+        )
+        return
     with open(path, "rb") as f:
         data = f.read()
     if b"external_data" in data or b"location" in data:
@@ -347,20 +398,25 @@ def scan_onnx(path: Path, result: ScanResult) -> None:
     result.findings.append(Finding("INFO", "ONNX byte-level scan complete (full protobuf validation not performed)."))
 
 
-def scan_file(path: Path, verbose: bool, allow_modules: frozenset[str]) -> ScanResult:
+def scan_file(
+    path: Path,
+    verbose: bool,
+    allow_modules: frozenset[str],
+    max_read_bytes: int = DEFAULT_MAX_READ_BYTES,
+) -> ScanResult:
     fmt = sniff_format(path)
     result = ScanResult(path=str(path), format=fmt, sha256=sha256_of(path), size_bytes=path.stat().st_size)
     try:
         if fmt == "pickle":
-            scan_pickle_file(path, result, verbose, allow_modules)
+            scan_pickle_file(path, result, verbose, allow_modules, max_read_bytes=max_read_bytes)
         elif fmt == "pytorch-zip":
-            scan_pytorch_zip(path, result, verbose, allow_modules)
+            scan_pytorch_zip(path, result, verbose, allow_modules, max_read_bytes=max_read_bytes)
         elif fmt == "safetensors":
             scan_safetensors(path, result)
         elif fmt == "gguf":
             scan_gguf(path, result)
         elif fmt == "onnx":
-            scan_onnx(path, result)
+            scan_onnx(path, result, max_read_bytes=max_read_bytes)
         else:
             result.add("REVIEW", f"Unrecognized format '{fmt}' -- manual review required.")
     except Exception as e:
@@ -371,11 +427,35 @@ def scan_file(path: Path, verbose: bool, allow_modules: frozenset[str]) -> ScanR
 MODEL_EXTENSIONS = frozenset({".pt", ".pth", ".bin", ".ckpt", ".pkl", ".safetensors", ".gguf", ".onnx"})
 
 
+def _path_is_under_root(path: Path, root: Path) -> bool:
+    """True if resolved path is root itself or a descendant (path jail)."""
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 def collect_files(target: Path) -> list[Path]:
+    """Collect model files under target without following symlinks out of the tree."""
     if target.is_file():
         return [target]
     if target.is_dir():
-        return sorted(p for p in target.rglob("*") if p.is_file() and p.suffix.lower() in MODEL_EXTENSIONS)
+        root = target.resolve()
+        found: list[Path] = []
+        for dirpath, _dirnames, filenames in _os.walk(root, followlinks=False):
+            for name in filenames:
+                path = Path(dirpath) / name
+                if path.is_symlink():
+                    continue
+                if path.suffix.lower() not in MODEL_EXTENSIONS:
+                    continue
+                if not path.is_file():
+                    continue
+                if not _path_is_under_root(path, root):
+                    continue
+                found.append(path)
+        return sorted(found)
     raise FileNotFoundError(f"Path not found: {target}")
 
 
@@ -640,6 +720,7 @@ def apply_tier2(
     hf_repo: Optional[str],
     allowlist_path: Optional[Path],
     serving_runtime: str = "vllm",
+    scan_root: Optional[Path] = None,
 ) -> None:
     allowlist = trust_mod.load_allowlist(allowlist_path)
     effective_publisher = publisher
@@ -648,7 +729,18 @@ def apply_tier2(
 
     for r in results:
         path = Path(r.path)
-        expected = trust_mod.expected_hashes_for_file(path, expected_sha256, manifest)
+        expected, basename_only = trust_mod.expected_hashes_for_file(
+            path,
+            expected_sha256,
+            manifest,
+            scan_root=scan_root,
+        )
+        if basename_only:
+            r.add(
+                "REVIEW",
+                "Manifest digest matched by basename only (prefer a relative path key "
+                f"under the scan root for '{path.name}'). Ambiguous in nested trees.",
+            )
         prov = trust_mod.build_provenance(
             result=r,
             publisher=effective_publisher,
@@ -724,6 +816,16 @@ def cli() -> int:
         metavar="NAME",
         help="Intended AI-dept serving runtime (default: vllm).",
     )
+    parser.add_argument(
+        "--max-read-bytes",
+        type=int,
+        default=DEFAULT_MAX_READ_BYTES,
+        metavar="N",
+        help=(
+            "Max bytes to fully load for pickle/ONNX/zip-pickle scans "
+            f"(default: {DEFAULT_MAX_READ_BYTES}). Use 0 for unlimited."
+        ),
+    )
     # DEFERRED: optional experimental probes (not part of standard vLLM/HF handoff)
     parser.add_argument(
         "--experimental-behavior-probes",
@@ -746,6 +848,18 @@ def cli() -> int:
         )
         return 2
 
+    if args.hf_repo and not trust_mod.validate_hf_repo_id(args.hf_repo):
+        print(
+            f"error: invalid --hf-repo {args.hf_repo!r}; expected ORG/NAME "
+            "(letters, digits, ., _, - only)",
+            file=sys.stderr,
+        )
+        return 2
+
+    if args.max_read_bytes < 0:
+        print("error: --max-read-bytes must be >= 0 (0 = unlimited)", file=sys.stderr)
+        return 2
+
     target = Path(args.target).expanduser().resolve()
     try:
         files = collect_files(target)
@@ -757,7 +871,10 @@ def cli() -> int:
         return 2
 
     allow_modules = frozenset(args.allow_module)
-    results = [scan_file(p, args.verbose, allow_modules) for p in files]
+    results = [
+        scan_file(p, args.verbose, allow_modules, max_read_bytes=args.max_read_bytes)
+        for p in files
+    ]
 
     manifest = None
     manifest_path = None
@@ -770,6 +887,7 @@ def cli() -> int:
             return 2
 
     allowlist_path = Path(args.allowlist).expanduser().resolve() if args.allowlist else None
+    scan_root = target if target.is_dir() else target.parent
     apply_tier2(
         results,
         publisher=args.publisher,
@@ -779,6 +897,7 @@ def cli() -> int:
         hf_repo=args.hf_repo,
         allowlist_path=allowlist_path,
         serving_runtime=args.serving_runtime,
+        scan_root=scan_root,
     )
 
     if args.experimental_behavior_probes:

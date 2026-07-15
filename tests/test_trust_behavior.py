@@ -108,10 +108,12 @@ class TestTrustHashAndPublisher(unittest.TestCase):
             manifest_path=self.tmp / "m.json",
             hf_repo=None,
             allowlist_path=allow,
+            scan_root=self.tmp,
         )
         self.assertEqual(result.verdict, "SAFE")
         self.assertTrue(result.provenance["hash_match"])
         self.assertTrue(result.provenance["allowlisted"])
+        self.assertFalse(any("basename only" in f.detail for f in result.findings))
 
     def test_hf_metadata_mocked(self) -> None:
         result = self._scan_pickle(pickle.dumps(1))
@@ -170,6 +172,86 @@ class TestTrustHashAndPublisher(unittest.TestCase):
                 allowlist_path=None,
             )
         self.assertEqual(result.verdict, "REVIEW")
+
+    def test_validate_hf_repo_id(self) -> None:
+        self.assertTrue(trust_mod.validate_hf_repo_id("google/gemma-2-2b-it"))
+        self.assertTrue(trust_mod.validate_hf_repo_id("a/b"))
+        self.assertFalse(trust_mod.validate_hf_repo_id("../evil"))
+        self.assertFalse(trust_mod.validate_hf_repo_id("https://huggingface.co/x/y"))
+        self.assertFalse(trust_mod.validate_hf_repo_id("nopath"))
+        self.assertFalse(trust_mod.validate_hf_repo_id(""))
+
+    def test_relative_path_manifest_match_is_silent(self) -> None:
+        nest = self.tmp / "subdir"
+        nest.mkdir()
+        path = nest / "weights.pkl"
+        path.write_bytes(pickle.dumps({"w": 1}))
+        result = ms.scan_file(path, verbose=False, allow_modules=frozenset())
+        manifest = {"files": {"subdir/weights.pkl": result.sha256}}
+        ms.apply_tier2(
+            [result],
+            publisher=None,
+            expected_sha256=[],
+            manifest=manifest,
+            manifest_path=self.tmp / "m.json",
+            hf_repo=None,
+            allowlist_path=None,
+            scan_root=self.tmp,
+        )
+        self.assertEqual(result.verdict, "SAFE")
+        self.assertTrue(result.provenance["hash_match"])
+        self.assertFalse(
+            any("basename only" in f.detail for f in result.findings)
+        )
+
+    def test_basename_manifest_match_is_review(self) -> None:
+        nest = self.tmp / "subdir"
+        nest.mkdir()
+        path = nest / "weights.pkl"
+        path.write_bytes(pickle.dumps({"w": 1}))
+        result = ms.scan_file(path, verbose=False, allow_modules=frozenset())
+        manifest = {"files": {"weights.pkl": result.sha256}}
+        ms.apply_tier2(
+            [result],
+            publisher=None,
+            expected_sha256=[],
+            manifest=manifest,
+            manifest_path=self.tmp / "m.json",
+            hf_repo=None,
+            allowlist_path=None,
+            scan_root=self.tmp,
+        )
+        self.assertEqual(result.verdict, "REVIEW")
+        self.assertTrue(result.provenance["hash_match"])
+        self.assertTrue(any("basename only" in f.detail for f in result.findings))
+
+    def test_basename_collision_different_dirs_still_review(self) -> None:
+        a = self.tmp / "a"
+        b = self.tmp / "b"
+        a.mkdir()
+        b.mkdir()
+        path_a = a / "same.pkl"
+        path_b = b / "same.pkl"
+        path_a.write_bytes(pickle.dumps({"a": 1}))
+        path_b.write_bytes(pickle.dumps({"b": 2}))
+        ra = ms.scan_file(path_a, verbose=False, allow_modules=frozenset())
+        rb = ms.scan_file(path_b, verbose=False, allow_modules=frozenset())
+        # Flat key applies digest of ra to both → basename REVIEW; rb may DANGEROUS on mismatch.
+        manifest = {"files": {"same.pkl": ra.sha256}}
+        ms.apply_tier2(
+            [ra, rb],
+            publisher=None,
+            expected_sha256=[],
+            manifest=manifest,
+            manifest_path=self.tmp / "m.json",
+            hf_repo=None,
+            allowlist_path=None,
+            scan_root=self.tmp,
+        )
+        self.assertTrue(any("basename only" in f.detail for f in ra.findings))
+        self.assertTrue(any("basename only" in f.detail for f in rb.findings))
+        self.assertEqual(ra.verdict, "REVIEW")
+        self.assertEqual(rb.verdict, "DANGEROUS")  # hash mismatch + basename REVIEW
 
 
 class TestBehavior(unittest.TestCase):
