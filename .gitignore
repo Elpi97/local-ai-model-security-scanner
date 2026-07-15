@@ -26,7 +26,9 @@ venv/
 .coverage
 htmlcov/
 
-# Local scan outputs
+# Local scan outputs / handoff drafts
 scan_report.json
 *.scan.json
+handoff_report.md
+*_handoff.md
 models/

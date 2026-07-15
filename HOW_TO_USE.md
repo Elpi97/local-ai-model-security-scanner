@@ -1,203 +1,153 @@
 # How to use the Local AI Model Safety Scanner
 
-This guide is for **everyone** — whether you write code every day or you just need
-to check that a downloaded AI model file is safe before someone opens it.
+This guide is for **everyone** — security analysts and non-technical folks who need
+to understand the handoff process.
 
-## What this tool does (in plain English)
+## What this tool does (plain English)
 
-Think of an AI model file like a package that arrives at the office.
+Before the AI department opens a local model, you check three kinds of risk:
 
-Some packaging formats are like sealed cardboard — they only hold data.
-Others (especially older PyTorch `.pt` / `.pth` files) can hide a **self-running
-script**. The moment someone “opens” the package with a normal AI tool, that
-script can run on the computer.
+1. **File trickery** — some formats can run code when opened (especially old `.pt` pickles)
+2. **Wrong / swapped file** — does the SHA256 match what the publisher published?
+3. **Bad behavior** (optional) — does a quick chat probe look obviously unsafe?
 
-This scanner **looks inside the package without opening it the dangerous way**.
-It never loads or runs the model. It only reports:
+You always decide manually. Cleared files go into the drop folder by hand.
 
 | Verdict | Meaning | What you should do |
 |---|---|---|
-| **SAFE** | Nothing obviously dangerous was found | Usually OK to proceed |
-| **REVIEW** | Something unusual — not clearly malware, not clearly fine | Ask a technical person to look |
-| **DANGEROUS** | Strong signs of code that would run on load | **Do not open/load the model** |
-
-> Important: SAFE is not a lifetime warranty. Prefer models from trusted sources,
-> and treat REVIEW / DANGEROUS seriously.
+| **SAFE** | No blocking issues in the checks you ran | Usually OK to proceed (still use judgment) |
+| **REVIEW** | Something unusual | Ask a technical person / investigate |
+| **DANGEROUS** | Strong red flag (e.g. code exec or hash mismatch) | **Do not hand off** |
 
 ---
 
-## For non-technical people (click-friendly checklist)
+## For non-technical people
 
 ### You need
 
-1. A Mac or PC with **Python 3.9+** installed  
-   - Mac: open **Terminal** and type `python3 --version`  
-   - If it prints something like `Python 3.11.x`, you’re fine  
-2. This project folder (clone or download from GitHub)
-3. The model file you want to check (often `.gguf`, `.safetensors`, `.pt`, `.onnx`)
+1. Python 3.9+ (`python3 --version`)
+2. This project folder (Download ZIP from GitHub)
+3. The model file to check
 
-### Steps
-
-1. **Get the scanner**
-   - Open the GitHub repo: https://github.com/Elpi97/local-ai-model-security-scanner  
-   - Click the green **Code** button → **Download ZIP**  
-   - Unzip it somewhere easy, e.g. your Desktop  
-
-2. **Open a terminal in that folder**
-   - Mac: open **Terminal**, type `cd ` (with a space), drag the unzipped folder
-     into the Terminal window, press Enter  
-   - Windows: open the folder, click the address bar, type `cmd`, press Enter  
-
-3. **Scan your model file**
+### Basic scan (file safety only)
 
 ```bash
-python3 model_scanner.py "/full/path/to/your-model.gguf"
+python3 model_scanner.py "/full/path/to/your-model.gguf" \
+  --report scan_report.json \
+  --doc-report handoff_report.md
 ```
 
-Replace the path with your real file. Tip: drag the file onto the Terminal
-after typing `python3 model_scanner.py ` (note the space).
+- `scan_report.json` — machine-readable (automation / archives)
+- `handoff_report.md` — human documentation for the ticket, email, or share drive (includes sign-off table)
 
-4. **Read the last lines of output**
-   - Look for `Verdict:` and the **Summary** line  
-   - Follow the table above  
+### Stronger check (hash + known publisher)
 
-5. **Optional: save a report to share**
+Ask your security teammate for:
+
+- Publisher id (example: `google` or `ollama:library/gemma4`)
+- The expected SHA256 from the vendor / download page
 
 ```bash
-python3 model_scanner.py "/full/path/to/your-model.gguf" --report scan_report.json
+python3 model_scanner.py "/path/to/model.gguf" \
+  --publisher ollama:library/gemma4 \
+  --expected-sha256 PASTE_HEX_HERE \
+  --report scan_report.json -v
 ```
 
-Send `scan_report.json` to your IT / AI teammate along with the verdict.
+- **Hash mismatch = DANGEROUS** (treat as wrong or swapped file)
+- **Unknown publisher = REVIEW**
 
-### Common questions
+### Optional behavior probes (needs Ollama)
 
-**“I got `python3: command not found`”**  
-Install Python from https://www.python.org/downloads/ (or ask IT). On Windows
-try `py model_scanner.py ...` instead of `python3`.
+Only after the file looks OK:
 
-**“It says No recognized model files found”**  
-You pointed at a folder that doesn’t contain model files, or the extension isn’t
-supported. Point at the actual `.gguf` / `.safetensors` / `.pt` file.
+```bash
+python3 model_scanner.py "/path/to/model.gguf" \
+  --publisher ollama:library/gemma4 \
+  --behavior-probes --ollama-model gemma4:e2b-it-qat \
+  --report scan_report.json -v
+```
 
-**“Do I need the internet while scanning?”**  
-No. After you have the scanner and the model file on disk, the scan is fully offline.
+The report always includes a **behavior checklist** for manual chat tests even if you skip probes.
 
 ---
 
 ## For technical people
 
-### Zero-install run
+### Modules
 
-```bash
-git clone https://github.com/Elpi97/local-ai-model-security-scanner.git
-cd local-ai-model-security-scanner
-python3 model_scanner.py /path/to/model --report scan_report.json -v
-```
-
-Exit codes: `0` clear · `1` DANGEROUS (or REVIEW with `--strict`) · `2` usage error.
-
-### Install as a CLI
-
-```bash
-pip install .
-model-scanner /path/to/model --strict --report out.json
-```
-
-### Useful flags
-
-| Flag | Purpose |
+| File | Role |
 |---|---|
-| `-v` / `--verbose` | Show INFO findings too |
-| `--report OUT.json` | Write machine-readable results |
-| `--strict` | Fail CI / scripts on REVIEW as well as DANGEROUS |
-| `--allow-module PKG` | Allowlist a vetted pickle module (repeatable) |
+| `model_scanner.py` | Tier 1 + CLI orchestration |
+| `trust.py` | Tier 2 allowlist / hash / HF API |
+| `behavior.py` | Tier 3 checklist + Ollama probes |
+| `config/publishers.allowlist.json` | Trusted publisher ids |
+| `probes/behavior_probes.json` | Fixed probe prompts / keywords |
 
-### Dev / unit tests
+### CLI flags
+
+| Flag | Tier | Purpose |
+|---|---|---|
+| `-v` | 1 | Show INFO findings |
+| `--report OUT.json` | all | Machine-readable JSON artifact |
+| `--doc-report OUT.md` | all | Markdown documentation / audit handoff report |
+| `--strict` | all | REVIEW counts as failure (exit 1) |
+| `--allow-module PKG` | 1 | Pickle module allowlist |
+| `--publisher ID` | 2 | Must be in allowlist or REVIEW |
+| `--allowlist PATH` | 2 | Override allowlist file |
+| `--expected-sha256 HEX` | 2 | Repeatable; mismatch → DANGEROUS |
+| `--manifest PATH.json` | 2 | `{ "publisher": "...", "files": { "name": "sha256" } }` |
+| `--hf-repo ORG/NAME` | 2 | Optional online HF metadata |
+| `--behavior-probes` | 3 | Run Ollama probes after gate pass |
+| `--ollama-model NAME` | 3 | Required with `--behavior-probes` |
+| `--ollama-host URL` | 3 | Default `http://127.0.0.1:11434` |
+
+Gate for probes: skipped if any **DANGEROUS**, or any **REVIEW** when `--strict`.
+
+### Manifest example
+
+See [`examples/sample_manifest.json`](examples/sample_manifest.json).
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+python3 model_scanner.py models/gemma4-e2b-it-qat \
+  --manifest examples/sample_manifest.json -v --report out.json
+```
+
+### Dev tests
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
 ```
 
 ---
 
-## Worked example: scan Gemma 4 with Ollama
-
-This is the exact flow we used to validate the scanner on a real small model.
-
-### 1. Pull a small Gemma 4 model
+## Worked example: Gemma 4 via Ollama
 
 ```bash
 ollama pull gemma4:e2b-it-qat
-```
-
-(~4.3 GB — smallest practical Gemma 4 tag on Ollama at time of writing.)
-
-### 2. Find the on-disk weight files
-
-```bash
 ollama show gemma4:e2b-it-qat --modelfile | grep '^FROM'
 ```
 
-You’ll see paths under `~/.ollama/models/blobs/sha256-…`. Those blobs are GGUF
-files (they start with the ASCII magic `GGUF`).
-
-### 3. Point the scanner at them
+Symlink blobs to `models/…/*.gguf` (see earlier setup), then:
 
 ```bash
-# Example: create friendly names (symlinks), then scan the folder
-mkdir -p models/gemma4-e2b-it-qat
-ln -sf "$(ollama show gemma4:e2b-it-qat --modelfile | awk '/^FROM/{print $2}' | sed -n '1p')" \
-  models/gemma4-e2b-it-qat/weights.gguf
-ln -sf "$(ollama show gemma4:e2b-it-qat --modelfile | awk '/^FROM/{print $2}' | sed -n '2p')" \
-  models/gemma4-e2b-it-qat/aux.gguf
-
-python3 model_scanner.py models/gemma4-e2b-it-qat -v --report scan_report.json
+python3 model_scanner.py models/gemma4-e2b-it-qat \
+  --publisher ollama:library/gemma4 \
+  --manifest examples/sample_manifest.json \
+  --behavior-probes --ollama-model gemma4:e2b-it-qat \
+  -v --report scan_report.json
 ```
 
-### 4. Expected result for this known-good model
+Expected for known-good GGUF + matching hash: **SAFE** (probes may add REVIEW if heuristics flag a reply — investigate manually).
 
-```
-Verdict:    SAFE
-...
-Summary: 2 file(s) scanned -- 2 SAFE, 0 REVIEW, 0 DANGEROUS
-```
-
-GGUF findings look like: `GGUF OK (version=3, tensors~…, kv~…)`.
-
-A sample report shape lives in [`examples/sample_scan_report.json`](examples/sample_scan_report.json).
-
----
-
-## What “good” vs “bad” looks like
-
-**Good (SAFE GGUF)** — header sanity only, no code execution surface:
-
-```
-Verdict:    SAFE
-Findings:
-     [INFO] GGUF OK (version=3, tensors~541, kv~43).
-```
-
-**Bad (DANGEROUS pickle)** — would run code if loaded:
-
-```
-Verdict:    DANGEROUS
-Findings:
-     [CRITICAL] Pickle references code-execution-capable global 'os.system' ...
-     [CRITICAL] REDUCE invokes previously flagged dangerous global ...
-```
-
-If you see **DANGEROUS**, stop. Do not `torch.load()`, do not import the file into
-shared tooling, escalate to security / the AI team.
+Sample enriched report shape: [`examples/sample_scan_report.json`](examples/sample_scan_report.json).
 
 ---
 
 ## Still stuck?
 
-1. Re-run with `-v` and read every finding  
-2. Attach `scan_report.json` when asking for help  
-3. Open an issue on the repo with the **format** (gguf/pickle/…) and verdict —
-   not the whole model file
+1. Re-run with `-v`
+2. Attach `scan_report.json` (not the model weights)
+3. Open a GitHub issue with format + verdict only

@@ -1,0 +1,191 @@
+"""Tier 2: publisher allowlist, hash integrity, optional Hugging Face metadata."""
+
+from __future__ import annotations
+
+import json
+import urllib.error
+import urllib.request
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any, Optional
+
+_DEFAULT_ALLOWLIST = Path(__file__).resolve().parent / "config" / "publishers.allowlist.json"
+
+
+@dataclass
+class Provenance:
+    publisher: Optional[str] = None
+    allowlisted: Optional[bool] = None
+    expected_sha256: list[str] = field(default_factory=list)
+    hash_match: Optional[bool] = None
+    matched_expected: Optional[str] = None
+    manifest_path: Optional[str] = None
+    hf_repo: Optional[str] = None
+    hf: Optional[dict[str, Any]] = None
+
+
+def load_allowlist(path: Optional[Path] = None) -> dict[str, str]:
+    """Return mapping publisher_id -> note."""
+    allow_path = path or _DEFAULT_ALLOWLIST
+    if not allow_path.is_file():
+        return {}
+    data = json.loads(allow_path.read_text(encoding="utf-8"))
+    publishers = data.get("publishers", data)
+    if isinstance(publishers, list):
+        out: dict[str, str] = {}
+        for item in publishers:
+            if isinstance(item, str):
+                out[item] = ""
+            elif isinstance(item, dict) and "id" in item:
+                out[str(item["id"])] = str(item.get("note", ""))
+        return out
+    if isinstance(publishers, dict):
+        return {str(k): str(v) for k, v in publishers.items()}
+    return {}
+
+
+def load_manifest(path: Path) -> dict[str, Any]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("Manifest must be a JSON object")
+    return data
+
+
+def expected_hashes_for_file(
+    path: Path,
+    cli_expected: list[str],
+    manifest: Optional[dict[str, Any]],
+) -> list[str]:
+    """Collect expected digests from CLI and manifest file entries."""
+    expected = [h.lower().strip() for h in cli_expected if h and h.strip()]
+    if not manifest:
+        return list(dict.fromkeys(expected))
+    files = manifest.get("files", {})
+    if isinstance(files, dict):
+        name = path.name
+        resolved = str(path)
+        for key, digest in files.items():
+            key_s = str(key)
+            if key_s == name or key_s == resolved or Path(key_s).name == name:
+                if isinstance(digest, str) and digest.strip():
+                    expected.append(digest.lower().strip())
+                elif isinstance(digest, dict) and "sha256" in digest:
+                    expected.append(str(digest["sha256"]).lower().strip())
+    return list(dict.fromkeys(expected))
+
+
+def fetch_hf_metadata(repo_id: str, timeout: float = 15.0) -> dict[str, Any]:
+    """Fetch public model metadata from the Hugging Face Hub API."""
+    url = f"https://huggingface.co/api/models/{repo_id}"
+    req = urllib.request.Request(url, headers={"User-Agent": "model-scanner/0.1"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read().decode("utf-8")
+    data = json.loads(raw)
+    siblings = data.get("siblings") or []
+    sibling_shas: list[dict[str, str]] = []
+    for s in siblings:
+        if not isinstance(s, dict):
+            continue
+        entry: dict[str, str] = {"rfilename": str(s.get("rfilename", ""))}
+        lfs = s.get("lfs")
+        if isinstance(lfs, dict) and lfs.get("sha256"):
+            entry["sha256"] = str(lfs["sha256"])
+        if s.get("size") is not None:
+            entry["size"] = str(s["size"])
+        sibling_shas.append(entry)
+    return {
+        "id": data.get("id") or repo_id,
+        "author": data.get("author"),
+        "downloads": data.get("downloads"),
+        "likes": data.get("likes"),
+        "pipeline_tag": data.get("pipeline_tag"),
+        "library_name": data.get("library_name"),
+        "gated": data.get("gated"),
+        "tags": data.get("tags") or [],
+        "siblings": sibling_shas[:50],
+        "lastModified": data.get("lastModified"),
+    }
+
+
+def build_provenance(
+    *,
+    result: Any,
+    publisher: Optional[str],
+    allowlist: dict[str, str],
+    expected: list[str],
+    manifest_path: Optional[Path],
+    hf_repo: Optional[str],
+    Finding: type,
+) -> Provenance:
+    """Apply Tier-2 checks onto result findings; return Provenance for the report."""
+    prov = Provenance(
+        expected_sha256=list(expected),
+        manifest_path=str(manifest_path) if manifest_path else None,
+        hf_repo=hf_repo,
+    )
+
+    if expected:
+        actual = result.sha256.lower()
+        if actual in expected:
+            prov.hash_match = True
+            prov.matched_expected = actual
+            result.findings.append(Finding("INFO", f"SHA256 matches expected digest: {actual}"))
+        else:
+            prov.hash_match = False
+            result.add(
+                "CRITICAL",
+                f"SHA256 mismatch: got {actual}, expected one of {expected}. "
+                "Possible weight swap or wrong file.",
+            )
+
+    if publisher:
+        prov.publisher = publisher
+        if publisher in allowlist:
+            prov.allowlisted = True
+            note = allowlist[publisher]
+            detail = f"Publisher '{publisher}' is on the allowlist."
+            if note:
+                detail += f" Note: {note}"
+            result.findings.append(Finding("INFO", detail))
+        else:
+            prov.allowlisted = False
+            result.add(
+                "REVIEW",
+                f"Publisher '{publisher}' is not on the allowlist. "
+                "Confirm legitimacy before handoff.",
+            )
+
+    if hf_repo:
+        try:
+            meta = fetch_hf_metadata(hf_repo)
+            prov.hf = meta
+            result.findings.append(
+                Finding(
+                    "INFO",
+                    f"HF repo '{meta.get('id')}': downloads={meta.get('downloads')}, "
+                    f"likes={meta.get('likes')}, gated={meta.get('gated')}, "
+                    f"library={meta.get('library_name')}.",
+                )
+            )
+            actual = result.sha256.lower()
+            for sib in meta.get("siblings") or []:
+                if str(sib.get("sha256", "")).lower() == actual:
+                    result.findings.append(
+                        Finding(
+                            "INFO",
+                            f"SHA256 matches HF sibling file '{sib.get('rfilename')}'.",
+                        )
+                    )
+                    break
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError, OSError) as e:
+            result.add(
+                "REVIEW",
+                f"Hugging Face metadata unreachable for '{hf_repo}': {e}. "
+                "Could not enrich provenance (offline or invalid repo).",
+            )
+
+    return prov
+
+
+def provenance_asdict(prov: Provenance) -> dict[str, Any]:
+    return asdict(prov)

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "model-scanner"
-version = "0.1.0"
-description = "Static safety scanner for local AI model files (pickle, safetensors, GGUF, ONNX)"
+version = "0.2.0"
+description = "Tiered safety scanner for local AI models (file format, provenance, optional behavior probes)"
 readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.9"
@@ -17,9 +17,15 @@ model-scanner = "model_scanner:cli"
 [project.optional-dependencies]
 dev = ["pytest>=7", "ruff>=0.3"]
 
+[tool.setuptools]
+py-modules = ["model_scanner", "trust", "behavior"]
+
+[tool.setuptools.package-data]
+"*" = ["config/*.json", "probes/*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]  # so `import model_scanner` works from tests/
+pythonpath = ["."]
 addopts = "-v --tb=short"
 
 [tool.ruff]

@@ -1,98 +1,100 @@
 # Local AI Model Safety Scanner
 
-A single-file, dependency-free Python CLI that checks whether a local AI model
-file is safe to load — **before** you run `torch.load()` or hand it to your team.
+A Python CLI for cybersecurity analysts who are the **first line of defense**
+before a local AI model is handed to the AI department.
 
-It never loads or executes the model. It only inspects the file format.
+Default mode never loads or runs the model. Optional tiers add publisher/hash
+checks and (opt-in) lightweight Ollama behavior probes.
 
-👉 **New here?** Start with **[HOW_TO_USE.md](HOW_TO_USE.md)** — written for both
-non-technical and technical readers, including a real Gemma 4 walkthrough.
+👉 **Start here:** **[HOW_TO_USE.md](HOW_TO_USE.md)** (tech + non-tech).
+
+## Analyst workflow (manual)
+
+```
+1. Pull the model yourself
+2. Run this scanner (Tier 1 always; Tier 2/3 as needed)
+3. Manually copy cleared files into the drop folder
+4. Manually notify the AI department (attach scan_report.json)
+```
+
+No auto-approval, no watch folders, no auto-notify.
+
+## Three tiers
+
+| Tier | What | Changes verdict? | Needs network / runtime? |
+|---|---|---|---|
+| **1 – File safety** | Pickle / zip / safetensors / GGUF / ONNX static checks | Yes | No |
+| **2 – Trust & integrity** | Publisher allowlist, SHA256 vs expected, optional HF metadata | Yes | HF flag only |
+| **3 – Behavior** | Checklist always; optional Ollama probes after gate pass | Checklist no; probe FAIL → REVIEW | Ollama for probes |
+
+```bash
+# Tier 1 only
+python3 model_scanner.py /path/to/model --report scan_report.json --doc-report handoff_report.md
+
+# Tier 1 + 2
+python3 model_scanner.py /path/to/model.gguf \
+  --publisher ollama:library/gemma4 \
+  --expected-sha256 <hex> \
+  --report scan_report.json -v
+
+# Tier 1 + 2 + optional HF enrichment
+python3 model_scanner.py /path/to/model \
+  --publisher google --hf-repo google/gemma-4-E2B-it -v
+
+# After gate pass: Tier 3 Ollama probes
+python3 model_scanner.py /path/to/model.gguf \
+  --publisher ollama:library/gemma4 \
+  --behavior-probes --ollama-model gemma4:e2b-it-qat -v
+```
+
+### Verdicts
+
+| Verdict | Meaning |
+|---|---|
+| **SAFE** | No blocking file/trust issues found |
+| **REVIEW** | Unusual / unallowlisted / probe fail / HF unreachable — analyst judgment |
+| **DANGEROUS** | Concrete code-exec risk or **hash mismatch** (possible swap) — do not hand off |
 
 ## Quick start
 
 ```bash
-# No install needed — Python 3.9+ standard library only
-python3 model_scanner.py /path/to/model.pt
-
-# Save a JSON report you can share
-python3 model_scanner.py /path/to/model --report scan_report.json
+git clone https://github.com/Elpi97/local-ai-model-security-scanner.git
+cd local-ai-model-security-scanner
+python3 model_scanner.py /path/to/model.pt -v --report scan_report.json
 ```
 
-### What the verdict means
+Exit codes: `0` clear · `1` DANGEROUS (or REVIEW with `--strict`) · `2` usage error.
 
-| Verdict | Plain meaning |
-|---|---|
-| **SAFE** | No obvious code-execution / format red flags |
-| **REVIEW** | Unusual — ask a technical person before trusting |
-| **DANGEROUS** | Strong signs of code that would run on load — do not open |
-
-## Why this matters
-
-Most AI model malware isn’t in the tensor weights — it’s in the
-**serialization format**. Legacy PyTorch checkpoints (`.pt`, `.pth`, `.bin`,
-`.ckpt`) are Python **pickles**. Pickle opcodes can call *any* importable
-function the moment someone runs `torch.load()` / `pickle.load()`.
-
-This scanner statically disassembles that opcode stream with Python’s stdlib
-`pickletools` — the same core idea behind tools like Protect AI’s `ModelScan`
-/ `picklescan`.
-
-## What it checks, by format
+## What Tier 1 checks
 
 | Format | Extensions | Check |
 |---|---|---|
-| Legacy pickle | `.pt` `.pth` `.bin` `.ckpt` `.pkl` | Dangerous `GLOBAL` / `STACK_GLOBAL` / `INST` refs and call opcodes (`REDUCE`, `OBJ`, …) |
-| PyTorch zip checkpoint | `.pt` `.pth` `.bin` (zip-based) | Scans `data.pkl`; flags zip-slip |
-| Safetensors | `.safetensors` | Header structure, offset bounds, suspicious metadata URLs |
-| GGUF | `.gguf` | Magic bytes, version, sane tensor/KV counts |
-| ONNX | `.onnx` | External-data path traversal and custom/vendor ops |
+| Legacy pickle | `.pt` `.pth` `.bin` `.ckpt` `.pkl` | Dangerous `GLOBAL` / `INST` / call opcodes |
+| PyTorch zip | `.pt` `.pth` `.bin` | `data.pkl` + zip-slip |
+| Safetensors | `.safetensors` | Header / offsets / metadata URLs |
+| GGUF | `.gguf` | Magic, version, sanity counts |
+| ONNX | `.onnx` | External-data traversal / custom ops |
 
-## Common commands
+## Config & examples
 
-```bash
-# Single file
-python3 model_scanner.py ~/downloads/some_model.pt
+- Publisher allowlist: [`config/publishers.allowlist.json`](config/publishers.allowlist.json)
+- Behavior probes: [`probes/behavior_probes.json`](probes/behavior_probes.json)
+- Sample manifest / report: [`examples/`](examples/)
 
-# Whole directory (e.g. a cloned Hugging Face repo)
-python3 model_scanner.py ~/downloads/some-model-repo/
-
-# Verbose + JSON report
-python3 model_scanner.py ~/downloads/model.safetensors -v --report scan_report.json
-
-# Stricter gating (REVIEW counts as failure)
-python3 model_scanner.py ~/downloads/model.pt --strict
-
-# Allowlist a module you already vetted
-python3 model_scanner.py ~/downloads/model.pt --allow-module some_trusted_pkg
-```
-
-Exit codes: `0` = clear, `1` = DANGEROUS (or REVIEW with `--strict`), `2` = tool/usage error.
-
-## Try it on Gemma 4 (worked example)
-
-```bash
-ollama pull gemma4:e2b-it-qat
-# then follow the full steps in HOW_TO_USE.md → "Worked example: scan Gemma 4"
-```
-
-Expected outcome for that known-good model: **2 SAFE** (weights + aux GGUF).
-See [`examples/sample_scan_report.json`](examples/sample_scan_report.json).
-
-## Automated tests (developers)
+## Automated tests
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
-ruff check model_scanner.py tests/
 ```
 
 ## Known limitations
 
-- Static and best-effort — not a guarantee against obfuscated pickle chains.
-- ONNX checks are lightweight (not full protobuf validation).
-- Complements source/hash verification and sandboxed loading; does not replace them.
-- Does not score bias, quality, or jailbreak resistance — only file / code-execution safety.
+- Static Tier 1 is best-effort; obfuscated pickle chains can slip through.
+- Hash match proves **integrity vs an expected digest**, not that weights are free of semantic backdoors.
+- Behavior probes are keyword heuristics — FAIL means REVIEW, not RCE certainty.
+- Complements sandboxed loading and human review; does not replace them.
 
 ## License
 

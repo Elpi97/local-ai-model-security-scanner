@@ -1,0 +1,36 @@
+{
+  "publishers": [
+    {
+      "id": "google",
+      "note": "Google / DeepMind official model releases (e.g. Gemma)."
+    },
+    {
+      "id": "meta-llama",
+      "note": "Meta Llama official Hugging Face org."
+    },
+    {
+      "id": "openai",
+      "note": "OpenAI official releases when distributed as local weights."
+    },
+    {
+      "id": "mistralai",
+      "note": "Mistral AI official org."
+    },
+    {
+      "id": "ollama:library/gemma4",
+      "note": "Ollama library tag family gemma4 (verify digest locally)."
+    },
+    {
+      "id": "ollama:library",
+      "note": "Ollama official library namespace — still verify tag and hash."
+    },
+    {
+      "id": "unsloth",
+      "note": "Unsloth quantized redistributions — prefer verifying upstream hash too."
+    },
+    {
+      "id": "ggml-org",
+      "note": "ggml-org GGUF redistributions on Hugging Face."
+    }
+  ]
+}

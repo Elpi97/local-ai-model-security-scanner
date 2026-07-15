@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
-Static safety scanner for local AI model files (pickle/PyTorch, safetensors, GGUF, ONNX).
-This tool NEVER executes, unpickles, or loads any model. It uses pickletools.genops()
-to statically disassemble opcodes and report what would happen *if* loaded.
+Static safety scanner for local AI model files (pickle/PyTorch, safetensors, GGUF, ONNX),
+with optional Tier-2 provenance (publisher/hash/HF) and Tier-3 behavior checklist / Ollama probes.
+
+Tier 1 (default) NEVER executes, unpickles, or loads any model.
+Tier 3 probes are opt-in and use a separate local runtime (Ollama) after file+trust gates pass.
 
 Usage:   model-scanner <file-or-directory> [options]
-Exit codes: 0=SAFE, 1=DANGEROUS, 2=error
+Exit codes: 0=SAFE, 1=DANGEROUS (or REVIEW with --strict), 2=error
 """
 
 from __future__ import annotations
 
-__version__: str = "0.1.0"
+__version__: str = "0.2.0"
 
 
 import argparse
@@ -22,7 +24,12 @@ import struct
 import sys
 import zipfile
 from dataclasses import dataclass, field, asdict
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Optional
+
+import behavior as behavior_mod
+import trust as trust_mod
 
 
 DANGEROUS_MODULES: frozenset[str] = frozenset([
@@ -99,6 +106,9 @@ class ScanResult:
     size_bytes: int
     verdict: str = "SAFE"
     findings: list[Finding] = field(default_factory=list)
+    provenance: Optional[dict[str, Any]] = None
+    behavior_checklist: list[dict[str, str]] = field(default_factory=behavior_mod.default_checklist)
+    behavior_results: Optional[dict[str, Any]] = None
 
     def add(self, severity: str, detail: str) -> None:
         self.findings.append(Finding(severity, detail))
@@ -379,12 +389,31 @@ def print_report(results: list[ScanResult], verbose: bool) -> None:
         print(f"Size:       {r.size_bytes:,} bytes")
         print(f"SHA256:     {r.sha256}")
         print(f"Verdict:    {VERDICT_SYMBOL[r.verdict]}")
+        if r.provenance:
+            pub = r.provenance.get("publisher")
+            allow = r.provenance.get("allowlisted")
+            hmatch = r.provenance.get("hash_match")
+            if pub is not None or allow is not None or hmatch is not None or r.provenance.get("hf_repo"):
+                print("Provenance:")
+                if pub is not None:
+                    print(f"     publisher:   {pub} (allowlisted={allow})")
+                if hmatch is not None:
+                    print(f"     hash_match:  {hmatch}")
+                if r.provenance.get("hf_repo"):
+                    print(f"     hf_repo:     {r.provenance.get('hf_repo')}")
         if r.findings:
             print("Findings:")
             for f in r.findings:
                 if f.severity == "INFO" and not verbose:
                     continue
                 print(f"     [{f.severity}] {f.detail}")
+        if r.behavior_checklist:
+            print("Behavior checklist (manual — does not change verdict by itself):")
+            for item in r.behavior_checklist:
+                print(f"     [ ] {item.get('id')}: {item.get('label')}")
+        if r.behavior_results and r.behavior_results.get("probes_run"):
+            print(f"Behavior probes: {r.behavior_results.get('summary')} "
+                  f"(model={r.behavior_results.get('ollama_model')})")
     print("=" * 78)
     total = len(results)
     safe = sum(1 for r in results if r.verdict == "SAFE")
@@ -398,15 +427,300 @@ def write_json_report(results: list[ScanResult], out_path: Path) -> None:
     out_path.write_text(json.dumps(payload, indent=2))
 
 
+def _overall_verdict(results: list[ScanResult]) -> str:
+    if any(r.verdict == "DANGEROUS" for r in results):
+        return "DANGEROUS"
+    if any(r.verdict == "REVIEW" for r in results):
+        return "REVIEW"
+    return "SAFE"
+
+
+def build_doc_report(
+    results: list[ScanResult],
+    *,
+    target: Optional[str] = None,
+    include_info: bool = True,
+    generated_at: Optional[str] = None,
+) -> str:
+    """Build a Markdown documentation report for handoff / audit records."""
+    ts = generated_at or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    overall = _overall_verdict(results)
+    total = len(results)
+    safe = sum(1 for r in results if r.verdict == "SAFE")
+    review = sum(1 for r in results if r.verdict == "REVIEW")
+    danger = sum(1 for r in results if r.verdict == "DANGEROUS")
+
+    lines: list[str] = [
+        "# Local AI Model Safety Scan Report",
+        "",
+        f"- **Generated:** {ts}",
+        f"- **Scanner version:** {__version__}",
+        f"- **Target:** `{target or (results[0].path if results else 'n/a')}`",
+        f"- **Overall verdict:** **{overall}**",
+        f"- **Files:** {total} scanned — {safe} SAFE, {review} REVIEW, {danger} DANGEROUS",
+        "",
+        "## Executive summary",
+        "",
+    ]
+    if overall == "SAFE":
+        lines.append(
+            "No blocking file-format or integrity issues were reported for the scanned "
+            "artifact(s). Analyst should still complete the behavior checklist (and any "
+            "optional probes) before manual handoff to the AI department."
+        )
+    elif overall == "DANGEROUS":
+        lines.append(
+            "**Do not hand off.** One or more artifacts were marked DANGEROUS "
+            "(serialization code-execution risk and/or SHA256 mismatch). Escalate and "
+            "quarantine until fully investigated."
+        )
+    else:
+        lines.append(
+            "**Manual review required.** One or more artifacts were marked REVIEW "
+            "(unknown publisher, inconclusive probes, HF unreachable, unrecognized "
+            "pickle globals, etc.). Resolve findings before drop-folder handoff."
+        )
+
+    lines += [
+        "",
+        "## Recommendation (manual process)",
+        "",
+        "1. Review findings below.",
+        "2. Complete the behavior checklist (or attach probe results).",
+        "3. If cleared: **manually** copy files to the AI drop folder.",
+        "4. **Manually** notify the AI department and attach this report (+ JSON if used).",
+        "",
+        "---",
+        "",
+    ]
+
+    for idx, r in enumerate(results, start=1):
+        lines += [
+            f"## File {idx}: `{Path(r.path).name}`",
+            "",
+            "| Field | Value |",
+            "|---|---|",
+            f"| Path | `{r.path}` |",
+            f"| Format | `{r.format}` |",
+            f"| Size | {r.size_bytes:,} bytes |",
+            f"| SHA256 | `{r.sha256}` |",
+            f"| Verdict | **{r.verdict}** |",
+            "",
+        ]
+        if r.provenance:
+            lines += ["### Provenance (Tier 2)", ""]
+            prov = r.provenance
+            lines.append(f"- **Publisher:** {prov.get('publisher') or '_not provided_'}")
+            lines.append(f"- **Allowlisted:** {prov.get('allowlisted')}")
+            lines.append(f"- **Hash match:** {prov.get('hash_match')}")
+            if prov.get("expected_sha256"):
+                lines.append("- **Expected SHA256:**")
+                for h in prov["expected_sha256"]:
+                    lines.append(f"  - `{h}`")
+            if prov.get("manifest_path"):
+                lines.append(f"- **Manifest:** `{prov.get('manifest_path')}`")
+            if prov.get("hf_repo"):
+                lines.append(f"- **HF repo:** `{prov.get('hf_repo')}`")
+                hf = prov.get("hf") or {}
+                if hf:
+                    lines.append(
+                        f"- **HF snapshot:** downloads={hf.get('downloads')}, "
+                        f"likes={hf.get('likes')}, gated={hf.get('gated')}, "
+                        f"library={hf.get('library_name')}"
+                    )
+            lines.append("")
+
+        lines += ["### Findings (Tier 1 / 2 / 3)", ""]
+        shown = [f for f in r.findings if include_info or f.severity != "INFO"]
+        if not shown:
+            lines.append("_No findings at the selected verbosity._")
+            lines.append("")
+        else:
+            lines.append("| Severity | Detail |")
+            lines.append("|---|---|")
+            for f in shown:
+                detail = f.detail.replace("|", "\\|")
+                lines.append(f"| {f.severity} | {detail} |")
+            lines.append("")
+
+        if r.behavior_checklist:
+            lines += [
+                "### Behavior checklist (Tier 3 — manual)",
+                "",
+                "Mark when completed by the analyst:",
+                "",
+            ]
+            for item in r.behavior_checklist:
+                lines.append(
+                    f"- [ ] **{item.get('id')}** — {item.get('label')}: "
+                    f"{item.get('prompt')}"
+                )
+            lines.append("")
+
+        br = r.behavior_results
+        if br and br.get("probes_run"):
+            lines += [
+                "### Behavior probes (optional runtime)",
+                "",
+                f"- **Ollama model:** `{br.get('ollama_model')}`",
+                f"- **Summary:** {br.get('summary')}",
+                "",
+            ]
+            probe_rows = br.get("results") or []
+            if probe_rows:
+                lines.append("| Probe ID | Category | Outcome | Detail |")
+                lines.append("|---|---|---|---|")
+                for row in probe_rows:
+                    if isinstance(row, dict):
+                        detail = str(row.get("detail", "")).replace("|", "\\|")[:200]
+                        lines.append(
+                            f"| {row.get('id')} | {row.get('category')} | "
+                            f"**{row.get('outcome')}** | {detail} |"
+                        )
+                lines.append("")
+
+    lines += [
+        "---",
+        "",
+        "## Analyst sign-off",
+        "",
+        "| Field | Value |",
+        "|---|---|",
+        "| Analyst name |  |",
+        "| Date |  |",
+        "| Final decision | APPROVE / REJECT / ESCALATE |",
+        "| Drop-folder path |  |",
+        "| AI dept notified | Yes / No |",
+        "| Notes |  |",
+        "",
+        "---",
+        "",
+        f"_Generated by model-scanner {__version__}. "
+        "This report documents checks performed; it is not a warranty of model safety._",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def write_doc_report(
+    results: list[ScanResult],
+    out_path: Path,
+    *,
+    target: Optional[str] = None,
+    include_info: bool = True,
+) -> None:
+    text = build_doc_report(results, target=target, include_info=include_info)
+    out_path.write_text(text, encoding="utf-8")
+
+
+def _gate_allows_probes(results: list[ScanResult], strict: bool) -> bool:
+    if any(r.verdict == "DANGEROUS" for r in results):
+        return False
+    if strict and any(r.verdict == "REVIEW" for r in results):
+        return False
+    return True
+
+
+def apply_tier2(
+    results: list[ScanResult],
+    *,
+    publisher: Optional[str],
+    expected_sha256: list[str],
+    manifest: Optional[dict[str, Any]],
+    manifest_path: Optional[Path],
+    hf_repo: Optional[str],
+    allowlist_path: Optional[Path],
+) -> None:
+    allowlist = trust_mod.load_allowlist(allowlist_path)
+    # Manifest may supply publisher if CLI omitted it
+    effective_publisher = publisher
+    if not effective_publisher and manifest and isinstance(manifest.get("publisher"), str):
+        effective_publisher = manifest["publisher"]
+
+    for r in results:
+        path = Path(r.path)
+        expected = trust_mod.expected_hashes_for_file(path, expected_sha256, manifest)
+        prov = trust_mod.build_provenance(
+            result=r,
+            publisher=effective_publisher,
+            allowlist=allowlist,
+            expected=expected,
+            manifest_path=manifest_path,
+            hf_repo=hf_repo,
+            Finding=Finding,
+        )
+        r.provenance = trust_mod.provenance_asdict(prov)
+
+
+def apply_tier3_probes(
+    results: list[ScanResult],
+    *,
+    ollama_model: str,
+    ollama_host: str,
+) -> None:
+    # Attach probe results to the first result for a single shared runtime check;
+    # findings that affect verdict are added there. Other files get a pointer summary.
+    if not results:
+        return
+    primary = results[0]
+    report = behavior_mod.run_behavior_probes(
+        model=ollama_model,
+        Finding=Finding,
+        result=primary,
+        host=ollama_host,
+    )
+    payload = behavior_mod.behavior_asdict(report)
+    primary.behavior_results = payload
+    for r in results[1:]:
+        r.behavior_results = {
+            "probes_run": report.probes_run,
+            "ollama_model": ollama_model,
+            "summary": report.summary,
+            "note": f"See primary file report: {primary.path}",
+            "checklist": r.behavior_checklist,
+            "results": [],
+        }
+
+
 def cli() -> int:
-    parser = argparse.ArgumentParser(description="Static safety scanner for local AI model files.")
+    parser = argparse.ArgumentParser(
+        description="Local AI model safety scanner (file format + optional trust/behavior tiers).",
+    )
     parser.add_argument("target", help="Path to a model file or directory to scan.")
-    parser.add_argument("--report", metavar="OUT.json", help="Write a JSON report.")
+    parser.add_argument("--report", metavar="OUT.json", help="Write a machine-readable JSON report.")
+    parser.add_argument(
+        "--doc-report",
+        metavar="OUT.md",
+        help="Write a Markdown documentation / handoff report for audit records.",
+    )
     parser.add_argument("--strict", action="store_true", help="Treat REVIEW as failure.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show all findings.")
     parser.add_argument("--allow-module", action="append", default=[], metavar="MODULE",
-                        help="Add a module to the trusted allowlist (repeatable).")
+                        help="Add a pickle module to the trusted allowlist (repeatable).")
+    # Tier 2
+    parser.add_argument("--publisher", metavar="ID",
+                        help="Publisher id to check against config/publishers.allowlist.json")
+    parser.add_argument("--allowlist", metavar="PATH.json",
+                        help="Override path to publisher allowlist JSON.")
+    parser.add_argument("--expected-sha256", action="append", default=[], metavar="HEX",
+                        help="Expected SHA256 digest (repeatable). Mismatch -> DANGEROUS.")
+    parser.add_argument("--manifest", metavar="PATH.json",
+                        help="JSON manifest with publisher and/or files{name: sha256}.")
+    parser.add_argument("--hf-repo", metavar="ORG/NAME",
+                        help="Optional Hugging Face repo id for online metadata enrichment.")
+    # Tier 3
+    parser.add_argument("--behavior-probes", action="store_true",
+                        help="After file+trust gate pass, run optional Ollama behavior probes.")
+    parser.add_argument("--ollama-model", metavar="NAME",
+                        help="Ollama model tag for --behavior-probes (required with that flag).")
+    parser.add_argument("--ollama-host", default="http://127.0.0.1:11434",
+                        help="Ollama HTTP base URL (default http://127.0.0.1:11434).")
     args = parser.parse_args()
+
+    if args.behavior_probes and not args.ollama_model:
+        print("error: --behavior-probes requires --ollama-model", file=sys.stderr)
+        return 2
+
     target = Path(args.target).expanduser().resolve()
     try:
         files = collect_files(target)
@@ -416,13 +730,59 @@ def cli() -> int:
     if not files:
         print(f"No recognized model files found under: {target}", file=sys.stderr)
         return 2
+
     allow_modules = frozenset(args.allow_module)
     results = [scan_file(p, args.verbose, allow_modules) for p in files]
+
+    manifest = None
+    manifest_path = None
+    if args.manifest:
+        manifest_path = Path(args.manifest).expanduser().resolve()
+        try:
+            manifest = trust_mod.load_manifest(manifest_path)
+        except (OSError, ValueError, json.JSONDecodeError) as e:
+            print(f"error: could not load manifest: {e}", file=sys.stderr)
+            return 2
+
+    allowlist_path = Path(args.allowlist).expanduser().resolve() if args.allowlist else None
+    apply_tier2(
+        results,
+        publisher=args.publisher,
+        expected_sha256=list(args.expected_sha256),
+        manifest=manifest,
+        manifest_path=manifest_path,
+        hf_repo=args.hf_repo,
+        allowlist_path=allowlist_path,
+    )
+
+    if args.behavior_probes:
+        if _gate_allows_probes(results, args.strict):
+            apply_tier3_probes(
+                results,
+                ollama_model=args.ollama_model,
+                ollama_host=args.ollama_host,
+            )
+        else:
+            print(
+                "Skipping behavior probes: file/trust gate did not pass "
+                "(DANGEROUS present, or REVIEW with --strict).",
+                file=sys.stderr,
+            )
+
     print_report(results, args.verbose)
     if args.report:
         out_path = Path(args.report).expanduser().resolve()
         write_json_report(results, out_path)
         print(f"\nJSON report written to: {out_path}")
+    if args.doc_report:
+        doc_path = Path(args.doc_report).expanduser().resolve()
+        write_doc_report(
+            results,
+            doc_path,
+            target=str(target),
+            include_info=args.verbose,
+        )
+        print(f"Documentation report written to: {doc_path}")
     has_dangerous = any(r.verdict == "DANGEROUS" for r in results)
     has_review = any(r.verdict == "REVIEW" for r in results)
     if has_dangerous or (args.strict and has_review):

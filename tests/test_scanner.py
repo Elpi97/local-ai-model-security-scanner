@@ -158,6 +158,35 @@ class TestCliHelpers(unittest.TestCase):
         self.assertEqual(payload[0]["verdict"], "SAFE")
         self.assertEqual(payload[0]["format"], "pickle")
 
+    def test_doc_report_markdown(self) -> None:
+        path = self.tmp / "safe.pkl"
+        path.write_bytes(pickle.dumps({"ok": True}))
+        result = ms.scan_file(path, verbose=False, allow_modules=frozenset())
+        ms.apply_tier2(
+            [result],
+            publisher="google",
+            expected_sha256=[result.sha256],
+            manifest=None,
+            manifest_path=None,
+            hf_repo=None,
+            allowlist_path=None,
+        )
+        # use default allowlist — google should be allowlisted
+        text = ms.build_doc_report(
+            [result],
+            target=str(path),
+            include_info=True,
+            generated_at="2026-07-15 00:00:00 UTC",
+        )
+        out = self.tmp / "handoff.md"
+        ms.write_doc_report([result], out, target=str(path))
+        self.assertTrue(out.is_file())
+        self.assertIn("# Local AI Model Safety Scan Report", text)
+        self.assertIn("Overall verdict", text)
+        self.assertIn("Analyst sign-off", text)
+        self.assertIn("Behavior checklist", text)
+        self.assertIn(result.sha256, text)
+
     def test_allow_module_suppresses_review(self) -> None:
         data = b"cmy_pkg\nConfig\n."
         result = ms.ScanResult("m", "pickle", "0", 0)

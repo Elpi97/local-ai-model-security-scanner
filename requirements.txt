@@ -1,2 +1,4 @@
 # No runtime dependencies — Python 3.9+ stdlib only.
 # Optional: pip install -e ".[dev]"  for pytest + ruff
+# Config: config/publishers.allowlist.json
+# Probes: probes/behavior_probes.json
