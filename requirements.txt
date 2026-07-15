@@ -1,0 +1,2 @@
+# No runtime dependencies — Python 3.9+ stdlib only.
+# Optional: pip install -e ".[dev]"  for pytest + ruff

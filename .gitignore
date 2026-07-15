@@ -1,0 +1,31 @@
+# Bytecode / optimized / dist
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# Virtual environment
+.venv/
+venv/
+.env/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*~
+
+# pytest / coverage / ruff caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local scan outputs
+scan_report.json
+*.scan.json
