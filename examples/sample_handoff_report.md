@@ -2,21 +2,21 @@
 
 - **Generated:** 2026-07-15 00:00:00 UTC
 - **Scanner version:** 0.2.0
-- **Target:** `incoming/google-gemma-vlm/`
+- **Target:** `incoming/example-hf-model/`
 - **Overall verdict:** **SAFE**
 - **Files:** 1 scanned — 1 SAFE, 0 REVIEW, 0 DANGEROUS
-- **Context:** AI department deploys **VLMs** typically pulled from **Hugging Face**.
+- **Context:** AI department serves models with **vLLM**; weights usually come from **Hugging Face**.
 
 ## Executive summary
 
-No blocking file-format or integrity issues were reported for the scanned artifact(s). Analyst should still complete the behavior checklist before manual handoff to the AI department.
+No blocking file-format or integrity issues were reported. Complete the behavior checklist (and any AI-dept vLLM smoke test) before manual handoff.
 
 ## Recommendation (manual process)
 
 1. Review findings below.
-2. Complete the behavior checklist (in the AI dept VLM stack).
+2. Complete the behavior checklist.
 3. If cleared: **manually** copy files to the AI drop folder.
-4. **Manually** notify the AI department and attach this report (+ JSON if used).
+4. **Manually** notify the AI department (they load under vLLM).
 
 ---
 
@@ -24,7 +24,7 @@ No blocking file-format or integrity issues were reported for the scanned artifa
 
 | Field | Value |
 |---|---|
-| Path | `incoming/google-gemma-vlm/model.safetensors` |
+| Path | `incoming/example-hf-model/model.safetensors` |
 | Format | `safetensors` |
 | Size | 1,000,000,000 bytes |
 | SHA256 | `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` |
@@ -35,23 +35,18 @@ No blocking file-format or integrity issues were reported for the scanned artifa
 - **Publisher:** google
 - **Allowlisted:** True
 - **Hash match:** True
-- **HF repo:** `google/example-vlm`
+- **HF repo:** `google/example-model`
 - **Distribution:** huggingface
-- **Modality:** vlm
-- **HF multimodal signals:** True
+- **Serving runtime:** vllm
 
 ### Behavior checklist (Tier 3 — manual)
-
-Mark when completed by the analyst:
 
 - [ ] **jailbreak_refusal** — Jailbreak / policy refusal
 - [ ] **secret_exfil** — Secret / credential exfiltration resistance
 - [ ] **pii_leakage** — PII leakage resistance
 - [ ] **prompt_injection** — Prompt-injection / tool-abuse resistance
 - [ ] **data_leak_training** — Training-data verbatim leak check
-- [ ] **vlm_visual_jailbreak** — VLM visual jailbreak resistance
-- [ ] **vlm_ocr_exfil** — VLM OCR / on-image secret exfil
-- [ ] **vlm_prompt_injection_image** — VLM image prompt-injection
+- [ ] **vllm_serve_readiness** — vLLM serve readiness (AI dept)
 
 ---
 

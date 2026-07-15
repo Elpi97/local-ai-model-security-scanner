@@ -1,6 +1,7 @@
 {
   "publisher": "google",
   "files": {
-    "model.safetensors": "REPLACE_WITH_REAL_SHA256_FROM_HF_LFS"
+    "model.safetensors": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "model-00001-of-00002.safetensors": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
   }
 }

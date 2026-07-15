@@ -120,10 +120,10 @@ class TestTrustHashAndPublisher(unittest.TestCase):
             "author": "google",
             "downloads": 42,
             "likes": 7,
-            "pipeline_tag": "image-text-to-text",
+            "pipeline_tag": "text-generation",
             "library_name": "transformers",
             "gated": False,
-            "tags": ["gemma", "image-text-to-text"],
+            "tags": ["text-generation"],
             "siblings": [{"rfilename": "model.safetensors", "lfs": {"sha256": result.sha256}}],
             "lastModified": "2026-01-01",
         }
@@ -187,16 +187,16 @@ class TestBehavior(unittest.TestCase):
         self.assertTrue(result.behavior_checklist)
         ids = {i["id"] for i in result.behavior_checklist}
         self.assertIn("jailbreak_refusal", ids)
-        self.assertIn("vlm_visual_jailbreak", ids)
+        self.assertIn("vllm_serve_readiness", ids)
 
     def test_hf_sibling_name_mismatch_dangerous(self) -> None:
         path = self.tmp / "pytorch_model.bin"
         path.write_bytes(pickle.dumps({"w": 1}))
         result = ms.scan_file(path, verbose=False, allow_modules=frozenset())
         payload = {
-            "id": "acme/vlm",
-            "pipeline_tag": "image-text-to-text",
-            "tags": ["image-text-to-text"],
+            "id": "acme/model",
+            "pipeline_tag": "text-generation",
+            "tags": ["text-generation"],
             "downloads": 1,
             "likes": 0,
             "gated": False,
@@ -227,12 +227,13 @@ class TestBehavior(unittest.TestCase):
                 expected_sha256=[],
                 manifest=None,
                 manifest_path=None,
-                hf_repo="acme/vlm",
+                hf_repo="acme/model",
                 allowlist_path=None,
-                modality="vlm",
+                serving_runtime="vllm",
             )
         self.assertEqual(result.verdict, "DANGEROUS")
         self.assertFalse(result.provenance["hash_match"])
+        self.assertEqual(result.provenance["serving_runtime"], "vllm")
 
     def test_score_response_fail(self) -> None:
         probe = {
@@ -307,7 +308,7 @@ class TestBehavior(unittest.TestCase):
             generate_fn=boom,
         )
         self.assertEqual(result.verdict, "REVIEW")
-        self.assertEqual(report.summary, "ollama_unreachable")
+        self.assertEqual(report.summary, "runtime_unreachable")
 
     def test_gate_skips_on_dangerous(self) -> None:
         dangerous = ms.ScanResult("x", "pickle", "0" * 64, 1, verdict="DANGEROUS")
@@ -318,10 +319,13 @@ class TestBehavior(unittest.TestCase):
         self.assertTrue(ms._gate_allows_probes([review], strict=False))
         self.assertFalse(ms._gate_allows_probes([review], strict=True))
 
-    def test_cli_behavior_requires_model(self) -> None:
+    def test_cli_experimental_probes_require_model(self) -> None:
         path = self.tmp / "m.pkl"
         path.write_bytes(pickle.dumps(1))
-        with mock.patch("sys.argv", ["model_scanner", str(path), "--behavior-probes"]):
+        with mock.patch(
+            "sys.argv",
+            ["model_scanner", str(path), "--experimental-behavior-probes"],
+        ):
             code = ms.cli()
         self.assertEqual(code, 2)
 
@@ -330,7 +334,8 @@ class TestDefaultAllowlistExists(unittest.TestCase):
     def test_bundled_allowlist_loads(self) -> None:
         allow = trust_mod.load_allowlist()
         self.assertIn("google", allow)
-        self.assertIn("ollama:library/gemma4", allow)
+        self.assertIn("meta-llama", allow)
+        self.assertNotIn("ollama:library/gemma4", allow)
 
     def test_bundled_probes_load(self) -> None:
         probes = behavior_mod.load_probes()

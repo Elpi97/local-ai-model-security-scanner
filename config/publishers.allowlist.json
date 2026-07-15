@@ -2,11 +2,11 @@
   "publishers": [
     {
       "id": "google",
-      "note": "Google / DeepMind official HF releases (Gemma VLMs, etc.)."
+      "note": "Google / DeepMind official HF releases (e.g. Gemma) for vLLM serving."
     },
     {
       "id": "meta-llama",
-      "note": "Meta Llama official Hugging Face org (including multimodal variants)."
+      "note": "Meta Llama official Hugging Face org."
     },
     {
       "id": "openai",
@@ -14,27 +14,19 @@
     },
     {
       "id": "mistralai",
-      "note": "Mistral AI official HF org (text and multimodal)."
+      "note": "Mistral AI official HF org."
     },
     {
       "id": "Qwen",
-      "note": "Alibaba Qwen official HF org (includes VL / VLM repos)."
+      "note": "Alibaba Qwen official HF org."
     },
     {
-      "id": "ollama:library/gemma4",
-      "note": "Ollama library tag family gemma4 (verify digest locally)."
-    },
-    {
-      "id": "ollama:library",
-      "note": "Ollama official library namespace — still verify tag and hash."
-    },
-    {
-      "id": "unsloth",
-      "note": "Unsloth quantized redistributions — prefer verifying upstream HF hash too."
+      "id": "microsoft",
+      "note": "Microsoft official HF orgs (e.g. Phi) when used under vLLM."
     },
     {
       "id": "ggml-org",
-      "note": "ggml-org GGUF redistributions on Hugging Face."
+      "note": "ggml-org GGUF redistributions on Hugging Face (if AI dept accepts GGUF)."
     }
   ]
 }

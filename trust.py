@@ -23,53 +23,7 @@ class Provenance:
     hf_repo: Optional[str] = None
     hf: Optional[dict[str, Any]] = None
     distribution: Optional[str] = None  # e.g. huggingface
-    modality: Optional[str] = None  # e.g. vlm, text
-    hf_is_multimodal: Optional[bool] = None
-
-
-_VLM_TAG_HINTS = frozenset({
-    "image-text-to-text",
-    "image-to-text",
-    "visual-question-answering",
-    "any-to-any",
-    "image-text-to-image",
-    "video-text-to-text",
-    "multimodal",
-})
-
-
-def detect_multimodal(meta: dict[str, Any]) -> bool:
-    pipeline = str(meta.get("pipeline_tag") or "").lower()
-    if pipeline in _VLM_TAG_HINTS or "image" in pipeline:
-        return True
-    tags = [str(t).lower() for t in (meta.get("tags") or [])]
-    return any(t in _VLM_TAG_HINTS or t.startswith("image-") for t in tags)
-
-
-def match_file_to_hf_siblings(
-    *,
-    path: Path,
-    sha256: str,
-    siblings: list[dict[str, str]],
-) -> tuple[Optional[bool], Optional[str]]:
-    """Return (match, sibling_name). True/False if a named LFS digest exists; None if none."""
-    actual = sha256.lower()
-    name = path.name
-    # Prefer same basename
-    for sib in siblings:
-        rfilename = str(sib.get("rfilename") or "")
-        sib_sha = str(sib.get("sha256") or "").lower()
-        if not sib_sha:
-            continue
-        if Path(rfilename).name == name:
-            return (sib_sha == actual), rfilename
-    # Fallback: any sibling with this digest
-    for sib in siblings:
-        rfilename = str(sib.get("rfilename") or "")
-        sib_sha = str(sib.get("sha256") or "").lower()
-        if sib_sha and sib_sha == actual:
-            return True, rfilename
-    return None, None
+    serving_runtime: Optional[str] = None  # e.g. vllm
 
 
 def load_allowlist(path: Optional[Path] = None) -> dict[str, str]:
@@ -125,7 +79,7 @@ def expected_hashes_for_file(
 def fetch_hf_metadata(repo_id: str, timeout: float = 15.0) -> dict[str, Any]:
     """Fetch public model metadata from the Hugging Face Hub API."""
     url = f"https://huggingface.co/api/models/{repo_id}"
-    req = urllib.request.Request(url, headers={"User-Agent": "model-scanner/0.1"})
+    req = urllib.request.Request(url, headers={"User-Agent": "model-scanner/0.2"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read().decode("utf-8")
     data = json.loads(raw)
@@ -155,6 +109,30 @@ def fetch_hf_metadata(repo_id: str, timeout: float = 15.0) -> dict[str, Any]:
     }
 
 
+def match_file_to_hf_siblings(
+    *,
+    path: Path,
+    sha256: str,
+    siblings: list[dict[str, str]],
+) -> tuple[Optional[bool], Optional[str]]:
+    """Return (match, sibling_name). True/False if a named LFS digest exists; None if none."""
+    actual = sha256.lower()
+    name = path.name
+    for sib in siblings:
+        rfilename = str(sib.get("rfilename") or "")
+        sib_sha = str(sib.get("sha256") or "").lower()
+        if not sib_sha:
+            continue
+        if Path(rfilename).name == name:
+            return (sib_sha == actual), rfilename
+    for sib in siblings:
+        rfilename = str(sib.get("rfilename") or "")
+        sib_sha = str(sib.get("sha256") or "").lower()
+        if sib_sha and sib_sha == actual:
+            return True, rfilename
+    return None, None
+
+
 def build_provenance(
     *,
     result: Any,
@@ -164,7 +142,7 @@ def build_provenance(
     manifest_path: Optional[Path],
     hf_repo: Optional[str],
     Finding: type,
-    modality: Optional[str] = "vlm",
+    serving_runtime: Optional[str] = "vllm",
 ) -> Provenance:
     """Apply Tier-2 checks onto result findings; return Provenance for the report."""
     prov = Provenance(
@@ -172,7 +150,7 @@ def build_provenance(
         manifest_path=str(manifest_path) if manifest_path else None,
         hf_repo=hf_repo,
         distribution="huggingface" if hf_repo else None,
-        modality=modality,
+        serving_runtime=serving_runtime,
     )
 
     if expected:
@@ -211,23 +189,21 @@ def build_provenance(
         try:
             meta = fetch_hf_metadata(hf_repo)
             prov.hf = meta
-            is_mm = detect_multimodal(meta)
-            prov.hf_is_multimodal = is_mm
-            mm_note = "multimodal/VLM signals present" if is_mm else "no strong multimodal tag detected"
             result.findings.append(
                 Finding(
                     "INFO",
                     f"HF repo '{meta.get('id')}': downloads={meta.get('downloads')}, "
                     f"likes={meta.get('likes')}, gated={meta.get('gated')}, "
-                    f"library={meta.get('library_name')}, pipeline={meta.get('pipeline_tag')}, "
-                    f"{mm_note}.",
+                    f"library={meta.get('library_name')}, pipeline={meta.get('pipeline_tag')}.",
                 )
             )
-            if modality == "vlm" and not is_mm:
-                result.add(
-                    "REVIEW",
-                    f"Handoff marked as VLM but HF repo '{hf_repo}' lacks clear multimodal "
-                    "pipeline/tags. Confirm the AI dept pulled the correct vision-language repo.",
+            if serving_runtime == "vllm":
+                result.findings.append(
+                    Finding(
+                        "INFO",
+                        "Intended serving runtime: vLLM. Prefer safetensors weights; "
+                        "avoid legacy pickle checkpoints when possible.",
+                    )
                 )
             match, sib_name = match_file_to_hf_siblings(
                 path=Path(result.path),

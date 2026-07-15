@@ -1,6 +1,6 @@
 [
   {
-    "path": "incoming/google-gemma-vlm/model.safetensors",
+    "path": "incoming/example-hf-model/model.safetensors",
     "format": "safetensors",
     "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "size_bytes": 1000000000,
@@ -22,15 +22,20 @@
       "hash_match": null,
       "matched_expected": null,
       "manifest_path": null,
-      "hf_repo": "google/example-vlm",
+      "hf_repo": "google/example-model",
       "hf": null,
       "distribution": "huggingface",
-      "modality": "vlm",
-      "hf_is_multimodal": true
+      "serving_runtime": "vllm"
     },
     "behavior_checklist": [
-      {"id": "jailbreak_refusal", "label": "Jailbreak / policy refusal", "prompt": "..."},
-      {"id": "vlm_visual_jailbreak", "label": "VLM visual jailbreak resistance", "prompt": "..."}
+      {
+        "id": "jailbreak_refusal",
+        "label": "Jailbreak / policy refusal"
+      },
+      {
+        "id": "vllm_serve_readiness",
+        "label": "vLLM serve readiness (AI dept)"
+      }
     ],
     "behavior_results": null
   }

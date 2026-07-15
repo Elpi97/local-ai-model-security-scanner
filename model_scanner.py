@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
 Static safety scanner for local AI model files (pickle/PyTorch, safetensors, GGUF, ONNX),
-with optional Tier-2 provenance (publisher/hash/HF) and Tier-3 behavior checklist.
+with optional Tier-2 provenance (publisher/hash/HF) for AI-dept handoff.
 
-Tier 1 (default) NEVER executes, unpickles, or loads any model.
-Tier 3 runtime auto-probes are deferred; checklist is always included for manual review.
+Context: AI department serves models with **vLLM** and typically pulls weights from
+**Hugging Face**. Tier 1 never loads models. Optional Ollama runtime probes exist in
+code but are TEMPORARILY DEFERRED from the standard handoff path.
 
 Usage:   model-scanner <file-or-directory> [options]
 Exit codes: 0=SAFE, 1=DANGEROUS (or REVIEW with --strict), 2=error
@@ -412,8 +413,10 @@ def print_report(results: list[ScanResult], verbose: bool) -> None:
             for item in r.behavior_checklist:
                 print(f"     [ ] {item.get('id')}: {item.get('label')}")
         if r.behavior_results and r.behavior_results.get("probes_run"):
-            print(f"Behavior probes: {r.behavior_results.get('summary')} "
-                  f"(model={r.behavior_results.get('ollama_model')})")
+            print(
+                f"Behavior probes (DEFERRED path): {r.behavior_results.get('summary')} "
+                f"(runtime_model={r.behavior_results.get('ollama_model')})"
+            )
     print("=" * 78)
     total = len(results)
     safe = sum(1 for r in results if r.verdict == "SAFE")
@@ -458,7 +461,8 @@ def build_doc_report(
         f"- **Target:** `{target or (results[0].path if results else 'n/a')}`",
         f"- **Overall verdict:** **{overall}**",
         f"- **Files:** {total} scanned — {safe} SAFE, {review} REVIEW, {danger} DANGEROUS",
-        "- **Context:** AI department deploys **VLMs** typically pulled from **Hugging Face**.",
+        "- **Context:** AI department serves models with **vLLM**; weights usually "
+        "come from **Hugging Face**.",
         "",
         "## Executive summary",
         "",
@@ -523,8 +527,7 @@ def build_doc_report(
             if prov.get("hf_repo"):
                 lines.append(f"- **HF repo:** `{prov.get('hf_repo')}`")
                 lines.append(f"- **Distribution:** {prov.get('distribution')}")
-                lines.append(f"- **Modality:** {prov.get('modality')}")
-                lines.append(f"- **HF multimodal signals:** {prov.get('hf_is_multimodal')}")
+                lines.append(f"- **Serving runtime:** {prov.get('serving_runtime')}")
                 hf = prov.get("hf") or {}
                 if hf:
                     lines.append(
@@ -532,8 +535,8 @@ def build_doc_report(
                         f"likes={hf.get('likes')}, gated={hf.get('gated')}, "
                         f"library={hf.get('library_name')}, pipeline={hf.get('pipeline_tag')}"
                     )
-            elif prov.get("modality"):
-                lines.append(f"- **Modality:** {prov.get('modality')}")
+            elif prov.get("serving_runtime"):
+                lines.append(f"- **Serving runtime:** {prov.get('serving_runtime')}")
             lines.append("")
 
         lines += ["### Findings (Tier 1 / 2 / 3)", ""]
@@ -566,9 +569,9 @@ def build_doc_report(
         br = r.behavior_results
         if br and br.get("probes_run"):
             lines += [
-                "### Behavior probes (optional runtime)",
+                "### Behavior probes (DEFERRED — not part of standard handoff)",
                 "",
-                f"- **Ollama model:** `{br.get('ollama_model')}`",
+                f"- **Runtime model tag:** `{br.get('ollama_model')}`",
                 f"- **Summary:** {br.get('summary')}",
                 "",
             ]
@@ -636,10 +639,9 @@ def apply_tier2(
     manifest_path: Optional[Path],
     hf_repo: Optional[str],
     allowlist_path: Optional[Path],
-    modality: str = "vlm",
+    serving_runtime: str = "vllm",
 ) -> None:
     allowlist = trust_mod.load_allowlist(allowlist_path)
-    # Manifest may supply publisher if CLI omitted it
     effective_publisher = publisher
     if not effective_publisher and manifest and isinstance(manifest.get("publisher"), str):
         effective_publisher = manifest["publisher"]
@@ -655,7 +657,7 @@ def apply_tier2(
             manifest_path=manifest_path,
             hf_repo=hf_repo,
             Finding=Finding,
-            modality=modality,
+            serving_runtime=serving_runtime,
         )
         r.provenance = trust_mod.provenance_asdict(prov)
 
@@ -715,29 +717,34 @@ def cli() -> int:
     parser.add_argument("--manifest", metavar="PATH.json",
                         help="JSON manifest with publisher and/or files{name: sha256}.")
     parser.add_argument("--hf-repo", metavar="ORG/NAME",
-                        help="Hugging Face repo id (AI dept pull source) for online metadata / LFS hash checks.")
+                        help="Hugging Face repo id (AI dept pull source) for metadata / LFS hash checks.")
     parser.add_argument(
-        "--modality",
-        choices=("vlm", "text"),
-        default="vlm",
-        help="Intended modality for handoff (default: vlm — AI dept uses vision-language models).",
+        "--serving-runtime",
+        default="vllm",
+        metavar="NAME",
+        help="Intended AI-dept serving runtime (default: vllm).",
     )
-    # Tier 3
-    parser.add_argument("--behavior-probes", action="store_true",
-                        help=argparse.SUPPRESS)  # deferred: keep flag, hide from help
-    parser.add_argument("--ollama-model", metavar="NAME", help=argparse.SUPPRESS)
-    parser.add_argument("--ollama-host", default="http://127.0.0.1:11434", help=argparse.SUPPRESS)
+    # DEFERRED: optional experimental probes (not part of standard vLLM/HF handoff)
+    parser.add_argument(
+        "--experimental-behavior-probes",
+        action="store_true",
+        help=argparse.SUPPRESS,  # deferred — hidden from --help
+    )
+    parser.add_argument("--experimental-probe-model", metavar="NAME", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--experimental-probe-host",
+        default="http://127.0.0.1:11434",
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args()
 
-    if args.behavior_probes and not args.ollama_model:
-        print("error: --behavior-probes requires --ollama-model", file=sys.stderr)
-        return 2
-    if args.behavior_probes:
+    if args.experimental_behavior_probes and not args.experimental_probe_model:
         print(
-            "note: runtime behavior probes are temporarily deferred; "
-            "prefer the manual VLM checklist in the report.",
+            "error: --experimental-behavior-probes requires --experimental-probe-model "
+            "(deferred feature; not used in standard vLLM handoff)",
             file=sys.stderr,
         )
+        return 2
 
     target = Path(args.target).expanduser().resolve()
     try:
@@ -771,20 +778,24 @@ def cli() -> int:
         manifest_path=manifest_path,
         hf_repo=args.hf_repo,
         allowlist_path=allowlist_path,
-        modality=args.modality,
+        serving_runtime=args.serving_runtime,
     )
 
-    if args.behavior_probes:
+    if args.experimental_behavior_probes:
+        print(
+            "NOTE: experimental behavior probes are TEMPORARILY DEFERRED from the "
+            "standard HF → vLLM handoff. Prefer the checklist + AI-dept vLLM testbed.",
+            file=sys.stderr,
+        )
         if _gate_allows_probes(results, args.strict):
             apply_tier3_probes(
                 results,
-                ollama_model=args.ollama_model,
-                ollama_host=args.ollama_host,
+                ollama_model=args.experimental_probe_model,
+                ollama_host=args.experimental_probe_host,
             )
         else:
             print(
-                "Skipping behavior probes: file/trust gate did not pass "
-                "(DANGEROUS present, or REVIEW with --strict).",
+                "Skipping experimental probes: file/trust gate did not pass.",
                 file=sys.stderr,
             )
 
