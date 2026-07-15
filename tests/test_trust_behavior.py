@@ -120,10 +120,10 @@ class TestTrustHashAndPublisher(unittest.TestCase):
             "author": "google",
             "downloads": 42,
             "likes": 7,
-            "pipeline_tag": "text-generation",
+            "pipeline_tag": "image-text-to-text",
             "library_name": "transformers",
             "gated": False,
-            "tags": ["gemma"],
+            "tags": ["gemma", "image-text-to-text"],
             "siblings": [{"rfilename": "model.safetensors", "lfs": {"sha256": result.sha256}}],
             "lastModified": "2026-01-01",
         }
@@ -187,6 +187,52 @@ class TestBehavior(unittest.TestCase):
         self.assertTrue(result.behavior_checklist)
         ids = {i["id"] for i in result.behavior_checklist}
         self.assertIn("jailbreak_refusal", ids)
+        self.assertIn("vlm_visual_jailbreak", ids)
+
+    def test_hf_sibling_name_mismatch_dangerous(self) -> None:
+        path = self.tmp / "pytorch_model.bin"
+        path.write_bytes(pickle.dumps({"w": 1}))
+        result = ms.scan_file(path, verbose=False, allow_modules=frozenset())
+        payload = {
+            "id": "acme/vlm",
+            "pipeline_tag": "image-text-to-text",
+            "tags": ["image-text-to-text"],
+            "downloads": 1,
+            "likes": 0,
+            "gated": False,
+            "library_name": "transformers",
+            "siblings": [
+                {
+                    "rfilename": "pytorch_model.bin",
+                    "lfs": {"sha256": "0" * 64},
+                }
+            ],
+            "lastModified": "2026-01-01",
+        }
+
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return json.dumps(payload).encode("utf-8")
+
+        with mock.patch("trust.urllib.request.urlopen", return_value=_Resp()):
+            ms.apply_tier2(
+                [result],
+                publisher=None,
+                expected_sha256=[],
+                manifest=None,
+                manifest_path=None,
+                hf_repo="acme/vlm",
+                allowlist_path=None,
+                modality="vlm",
+            )
+        self.assertEqual(result.verdict, "DANGEROUS")
+        self.assertFalse(result.provenance["hash_match"])
 
     def test_score_response_fail(self) -> None:
         probe = {

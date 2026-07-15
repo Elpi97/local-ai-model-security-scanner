@@ -458,6 +458,7 @@ def build_doc_report(
         f"- **Target:** `{target or (results[0].path if results else 'n/a')}`",
         f"- **Overall verdict:** **{overall}**",
         f"- **Files:** {total} scanned — {safe} SAFE, {review} REVIEW, {danger} DANGEROUS",
+        "- **Context:** AI department deploys **VLMs** typically pulled from **Hugging Face**.",
         "",
         "## Executive summary",
         "",
@@ -521,13 +522,18 @@ def build_doc_report(
                 lines.append(f"- **Manifest:** `{prov.get('manifest_path')}`")
             if prov.get("hf_repo"):
                 lines.append(f"- **HF repo:** `{prov.get('hf_repo')}`")
+                lines.append(f"- **Distribution:** {prov.get('distribution')}")
+                lines.append(f"- **Modality:** {prov.get('modality')}")
+                lines.append(f"- **HF multimodal signals:** {prov.get('hf_is_multimodal')}")
                 hf = prov.get("hf") or {}
                 if hf:
                     lines.append(
                         f"- **HF snapshot:** downloads={hf.get('downloads')}, "
                         f"likes={hf.get('likes')}, gated={hf.get('gated')}, "
-                        f"library={hf.get('library_name')}"
+                        f"library={hf.get('library_name')}, pipeline={hf.get('pipeline_tag')}"
                     )
+            elif prov.get("modality"):
+                lines.append(f"- **Modality:** {prov.get('modality')}")
             lines.append("")
 
         lines += ["### Findings (Tier 1 / 2 / 3)", ""]
@@ -630,6 +636,7 @@ def apply_tier2(
     manifest_path: Optional[Path],
     hf_repo: Optional[str],
     allowlist_path: Optional[Path],
+    modality: str = "vlm",
 ) -> None:
     allowlist = trust_mod.load_allowlist(allowlist_path)
     # Manifest may supply publisher if CLI omitted it
@@ -648,6 +655,7 @@ def apply_tier2(
             manifest_path=manifest_path,
             hf_repo=hf_repo,
             Finding=Finding,
+            modality=modality,
         )
         r.provenance = trust_mod.provenance_asdict(prov)
 
@@ -707,7 +715,13 @@ def cli() -> int:
     parser.add_argument("--manifest", metavar="PATH.json",
                         help="JSON manifest with publisher and/or files{name: sha256}.")
     parser.add_argument("--hf-repo", metavar="ORG/NAME",
-                        help="Optional Hugging Face repo id for online metadata enrichment.")
+                        help="Hugging Face repo id (AI dept pull source) for online metadata / LFS hash checks.")
+    parser.add_argument(
+        "--modality",
+        choices=("vlm", "text"),
+        default="vlm",
+        help="Intended modality for handoff (default: vlm — AI dept uses vision-language models).",
+    )
     # Tier 3
     parser.add_argument("--behavior-probes", action="store_true",
                         help="After file+trust gate pass, run optional Ollama behavior probes.")
@@ -753,6 +767,7 @@ def cli() -> int:
         manifest_path=manifest_path,
         hf_repo=args.hf_repo,
         allowlist_path=allowlist_path,
+        modality=args.modality,
     )
 
     if args.behavior_probes:
