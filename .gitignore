@@ -29,3 +29,4 @@ htmlcov/
 # Local scan outputs
 scan_report.json
 *.scan.json
+models/

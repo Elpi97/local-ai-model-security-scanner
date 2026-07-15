@@ -1,95 +1,87 @@
 # Local AI Model Safety Scanner
 
-A single-file, dependency-free Python CLI that statically checks whether a
-local AI model file is safe to load — before you run `torch.load()` or hand it
-off to your team.
+A single-file, dependency-free Python CLI that checks whether a local AI model
+file is safe to load — **before** you run `torch.load()` or hand it to your team.
+
+It never loads or executes the model. It only inspects the file format.
+
+👉 **New here?** Start with **[HOW_TO_USE.md](HOW_TO_USE.md)** — written for both
+non-technical and technical readers, including a real Gemma 4 walkthrough.
 
 ## Quick start
 
 ```bash
-# No install needed — stdlib only (Python 3.9+)
+# No install needed — Python 3.9+ standard library only
 python3 model_scanner.py /path/to/model.pt
 
-# Or install as a console script
-pip install .
-model-scanner /path/to/model --report scan_report.json
+# Save a JSON report you can share
+python3 model_scanner.py /path/to/model --report scan_report.json
 ```
 
-## Workflow
+### What the verdict means
 
-```
-1. Pull the model (from Hugging Face, a vendor, etc.)
-2. Run:  python3 model_scanner.py /path/to/model --report scan_report.json
-3. Read the verdict:
-      SAFE       -> proceed
-      REVIEW     -> inspect the flagged finding(s) before deciding
-      DANGEROUS  -> do not load it; escalate
-4. If cleared, copy the file into your trusted location
-```
-
-No automation, no watch-folders, no auto-approval — scan first, decide manually.
+| Verdict | Plain meaning |
+|---|---|
+| **SAFE** | No obvious code-execution / format red flags |
+| **REVIEW** | Unusual — ask a technical person before trusting |
+| **DANGEROUS** | Strong signs of code that would run on load — do not open |
 
 ## Why this matters
 
-Most AI model malware isn't in the tensor weights — it's in the
+Most AI model malware isn’t in the tensor weights — it’s in the
 **serialization format**. Legacy PyTorch checkpoints (`.pt`, `.pth`, `.bin`,
-`.ckpt`) are Python **pickles**, and pickle's `REDUCE` / `INST` opcodes can call
-*any* importable function with attacker-chosen arguments the moment someone
-runs `torch.load()` or `pickle.load()`.
+`.ckpt`) are Python **pickles**. Pickle opcodes can call *any* importable
+function the moment someone runs `torch.load()` / `pickle.load()`.
 
-This scanner **never unpickles or loads the model**. It statically
-disassembles the pickle opcode stream (Python's stdlib `pickletools`) to see
-*what a real load would try to call*, without calling it. Same core technique
-used by tools like Protect AI's `ModelScan` / `picklescan`.
+This scanner statically disassembles that opcode stream with Python’s stdlib
+`pickletools` — the same core idea behind tools like Protect AI’s `ModelScan`
+/ `picklescan`.
 
 ## What it checks, by format
 
 | Format | Extensions | Check |
 |---|---|---|
-| Legacy pickle | `.pt` `.pth` `.bin` `.ckpt` `.pkl` | Opcode scan for dangerous `GLOBAL` / `STACK_GLOBAL` / `INST` references (`os`, `subprocess`, `eval`, …) and call opcodes (`REDUCE`, `OBJ`, …) that invoke them |
-| PyTorch zip checkpoint | `.pt` `.pth` `.bin` (zip-based, PyTorch ≥1.6) | Unzips without executing; scans `data.pkl`; flags zip-slip / path traversal |
-| Safetensors | `.safetensors` | Header JSON/structure, offset bounds, suspicious metadata URLs |
+| Legacy pickle | `.pt` `.pth` `.bin` `.ckpt` `.pkl` | Dangerous `GLOBAL` / `STACK_GLOBAL` / `INST` refs and call opcodes (`REDUCE`, `OBJ`, …) |
+| PyTorch zip checkpoint | `.pt` `.pth` `.bin` (zip-based) | Scans `data.pkl`; flags zip-slip |
+| Safetensors | `.safetensors` | Header structure, offset bounds, suspicious metadata URLs |
 | GGUF | `.gguf` | Magic bytes, version, sane tensor/KV counts |
-| ONNX | `.onnx` | External data path traversal and custom/vendor ops |
+| ONNX | `.onnx` | External-data path traversal and custom/vendor ops |
 
-## Usage
+## Common commands
 
 ```bash
-# Scan a single file
+# Single file
 python3 model_scanner.py ~/downloads/some_model.pt
 
-# Scan a whole directory recursively (e.g. a HF repo you cloned)
+# Whole directory (e.g. a cloned Hugging Face repo)
 python3 model_scanner.py ~/downloads/some-model-repo/
 
-# Save a JSON report
-python3 model_scanner.py ~/downloads/model.safetensors --report scan_report.json
+# Verbose + JSON report
+python3 model_scanner.py ~/downloads/model.safetensors -v --report scan_report.json
 
-# Show every detail, not just flagged findings
-python3 model_scanner.py ~/downloads/model.pt -v
-
-# Treat REVIEW verdicts as a hard fail (stricter gating)
+# Stricter gating (REVIEW counts as failure)
 python3 model_scanner.py ~/downloads/model.pt --strict
 
-# Allowlist a vetted module you expect to see
+# Allowlist a module you already vetted
 python3 model_scanner.py ~/downloads/model.pt --allow-module some_trusted_pkg
 ```
 
-Exit codes: `0` = clear, `1` = DANGEROUS (or REVIEW with `--strict`), `2` = usage/tool error.
+Exit codes: `0` = clear, `1` = DANGEROUS (or REVIEW with `--strict`), `2` = tool/usage error.
 
-## Reading a verdict
-
-- **SAFE** — no dangerous globals, well-formed headers, no path traversal.
-- **REVIEW** — unrecognized pickle global, odd structure, embedded URLs, etc.
-  The tool surfaces it; you decide.
-- **DANGEROUS** — a concrete code-execution primitive was found (e.g. `REDUCE` /
-  `INST` calling `os.system`, `subprocess.Popen`, `eval`, …). Do not load with
-  `torch.load()` until it has been fully reverse-engineered.
-
-## Development
+## Try it on Gemma 4 (worked example)
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+ollama pull gemma4:e2b-it-qat
+# then follow the full steps in HOW_TO_USE.md → "Worked example: scan Gemma 4"
+```
+
+Expected outcome for that known-good model: **2 SAFE** (weights + aux GGUF).
+See [`examples/sample_scan_report.json`](examples/sample_scan_report.json).
+
+## Automated tests (developers)
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
 ruff check model_scanner.py tests/
@@ -97,14 +89,10 @@ ruff check model_scanner.py tests/
 
 ## Known limitations
 
-- Static, best-effort — not a guarantee. Obfuscated pickle chains that avoid
-  the blocklist can still slip through; treat REVIEW / unknown globals from
-  untrusted sources with real suspicion.
-- ONNX checking is a lightweight byte-level scan, not full protobuf validation.
-- Complements (does not replace) verifying publisher/hashes and loading in an
-  isolated environment as defense in depth.
-- Does not scan for bias, output quality, or model behavior — only file safety
-  / code-execution risk.
+- Static and best-effort — not a guarantee against obfuscated pickle chains.
+- ONNX checks are lightweight (not full protobuf validation).
+- Complements source/hash verification and sandboxed loading; does not replace them.
+- Does not score bias, quality, or jailbreak resistance — only file / code-execution safety.
 
 ## License
 
