@@ -4,23 +4,24 @@ A Python CLI for cybersecurity analysts who are the **first line of defense**
 before the AI department receives a **local VLM** (vision-language model),
 usually pulled from **Hugging Face**.
 
-Default mode never loads or runs the model. Optional tiers add publisher/hash
-checks (including HF LFS digests) and opt-in Ollama behavior probes.
+Default mode never loads or runs the model. Tier 2 adds publisher / hash / HF
+Hub checks. Tier 3 ships an **analyst checklist** (manual). Runtime auto-probes
+are **deferred for now**.
 
 👉 **Start here:** **[HOW_TO_USE.md](HOW_TO_USE.md)** (tech + non-tech).
 
-## Your environment (as configured)
+## Your environment
 
 | Role | What they do |
 |---|---|
-| **You (cybersecurity)** | Pull or receive the model, scan it, manually drop cleared files, notify AI |
+| **You (cybersecurity)** | Receive/pull the model, scan it, manually drop cleared files, notify AI |
 | **AI department** | Uses **VLMs**; typically obtains weights via **Hugging Face** |
 
 ## Analyst workflow (manual)
 
 ```
-1. Pull the HF / vendor model yourself (or receive the AI dept request + repo id)
-2. Run this scanner against the downloaded folder/files
+1. Pull the HF model (or receive the repo id + archive from AI dept)
+2. Run this scanner on the downloaded folder/files
 3. Manually copy cleared artifacts into the drop folder
 4. Manually notify the AI department (attach JSON + Markdown doc report)
 ```
@@ -30,10 +31,8 @@ No auto-approval, no watch folders, no auto-notify.
 ## Primary example: Hugging Face VLM repo
 
 ```bash
-# 1) Pull (example — use the repo your AI dept requested)
 huggingface-cli download google/gemma-4-E2B-it --local-dir ./incoming/gemma-4-E2B-it
 
-# 2) Scan the whole directory (shards, mmproj/GGUF, pickles, etc.)
 python3 model_scanner.py ./incoming/gemma-4-E2B-it \
   --publisher google \
   --hf-repo google/gemma-4-E2B-it \
@@ -43,17 +42,21 @@ python3 model_scanner.py ./incoming/gemma-4-E2B-it \
   --doc-report handoff_report.md
 ```
 
-`--modality vlm` is the **default** (matches AI dept usage). Use `--modality text` only for pure-text models.
+`--modality vlm` is the **default**. Use `--modality text` only for pure-text models.
 
-When `--hf-repo` is set, the scanner compares local SHA256 values to Hub LFS sibling digests when available (mismatch → **DANGEROUS**).
+With `--hf-repo`, local SHA256 is compared to Hub LFS sibling digests when available
+(mismatch → **DANGEROUS**).
 
 ## Three tiers
 
-| Tier | What | Changes verdict? | Needs network / runtime? |
+| Tier | What | Changes verdict? | Network? |
 |---|---|---|---|
 | **1 – File safety** | Pickle / zip / safetensors / GGUF / ONNX static checks | Yes | No |
-| **2 – Trust & integrity** | Publisher allowlist, SHA256, optional **HF metadata + LFS hash** | Yes | `--hf-repo` only |
-| **3 – Behavior** | Text + **VLM** checklist; optional Ollama probes after gate | Checklist no; probe FAIL → REVIEW | Ollama for probes |
+| **2 – Trust & integrity** | Publisher allowlist, SHA256, optional HF metadata + LFS hash | Yes | Only if `--hf-repo` |
+| **3 – Behavior checklist** | Text + VLM analyst checklist in report / doc | No (manual) | No |
+
+> **Deferred:** automated runtime behavior probes (e.g. local inference runners).
+> Use the checklist manually until that lands.
 
 ### Verdicts
 
@@ -68,7 +71,8 @@ When `--hf-repo` is set, the scanner compares local SHA256 values to Hub LFS sib
 ```bash
 git clone https://github.com/Elpi97/local-ai-model-security-scanner.git
 cd local-ai-model-security-scanner
-python3 model_scanner.py /path/to/hf-snapshot -v --hf-repo ORG/NAME --publisher google \
+python3 model_scanner.py /path/to/hf-snapshot -v \
+  --hf-repo ORG/NAME --publisher google \
   --report scan_report.json --doc-report handoff_report.md
 ```
 
@@ -80,14 +84,13 @@ Exit codes: `0` clear · `1` DANGEROUS (or REVIEW with `--strict`) · `2` usage 
 |---|---|---|
 | Legacy pickle | `.pt` `.pth` `.bin` `.ckpt` `.pkl` | Dangerous `GLOBAL` / `INST` / call opcodes |
 | PyTorch zip | `.pt` `.pth` `.bin` | `data.pkl` + zip-slip |
-| Safetensors | `.safetensors` | Header / offsets / metadata URLs (common for HF VLMs) |
-| GGUF | `.gguf` | Magic, version, sanity counts (weights + mmproj) |
+| Safetensors | `.safetensors` | Header / offsets / metadata URLs |
+| GGUF | `.gguf` | Magic, version, sanity counts |
 | ONNX | `.onnx` | External-data traversal / custom ops |
 
 ## Config & examples
 
 - Publisher allowlist: [`config/publishers.allowlist.json`](config/publishers.allowlist.json)
-- Behavior probes: [`probes/behavior_probes.json`](probes/behavior_probes.json)
 - Samples: [`examples/`](examples/)
 
 ## Automated tests
@@ -98,12 +101,16 @@ pip install -e ".[dev]"
 pytest
 ```
 
-## Known limitations
+## Current limitations
 
-- Static Tier 1 is best-effort; obfuscated pickle chains can slip through.
-- Hash/HF LFS match proves integrity vs an expected digest, not absence of semantic weight backdoors.
-- VLM image attacks need a vision-capable runtime for full testing; checklist covers analyst manual steps; Ollama probes are text heuristics.
-- Complements sandboxed loading and human review; does not replace them.
+See **[HOW_TO_USE.md → Current limitations](HOW_TO_USE.md#current-limitations)** for the full list.
+Highlights:
+
+- Static / best-effort — not a malware “proof”
+- Hash match ≠ no semantic weight backdoor
+- No automated VLM image probing yet (checklist only)
+- Light ONNX checks; no full TF/Keras coverage
+- Complements sandbox + human review; does not replace them
 
 ## License
 

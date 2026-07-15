@@ -1,7 +1,6 @@
 {
-  "publisher": "ollama:library/gemma4",
+  "publisher": "google",
   "files": {
-    "weights.gguf": "3646b4c147cd235a44d91df1546d3b7d8e29b547dbe4e1f80856419aa455e6fd",
-    "aux.gguf": "58c187648007cab392bd5678b87e862c3e8794017deb945feea2cf256195e96a"
+    "model.safetensors": "REPLACE_WITH_REAL_SHA256_FROM_HF_LFS"
   }
 }

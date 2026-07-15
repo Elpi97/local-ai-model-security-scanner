@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 Static safety scanner for local AI model files (pickle/PyTorch, safetensors, GGUF, ONNX),
-with optional Tier-2 provenance (publisher/hash/HF) and Tier-3 behavior checklist / Ollama probes.
+with optional Tier-2 provenance (publisher/hash/HF) and Tier-3 behavior checklist.
 
 Tier 1 (default) NEVER executes, unpickles, or loads any model.
-Tier 3 probes are opt-in and use a separate local runtime (Ollama) after file+trust gates pass.
+Tier 3 runtime auto-probes are deferred; checklist is always included for manual review.
 
 Usage:   model-scanner <file-or-directory> [options]
 Exit codes: 0=SAFE, 1=DANGEROUS (or REVIEW with --strict), 2=error
@@ -724,16 +724,20 @@ def cli() -> int:
     )
     # Tier 3
     parser.add_argument("--behavior-probes", action="store_true",
-                        help="After file+trust gate pass, run optional Ollama behavior probes.")
-    parser.add_argument("--ollama-model", metavar="NAME",
-                        help="Ollama model tag for --behavior-probes (required with that flag).")
-    parser.add_argument("--ollama-host", default="http://127.0.0.1:11434",
-                        help="Ollama HTTP base URL (default http://127.0.0.1:11434).")
+                        help=argparse.SUPPRESS)  # deferred: keep flag, hide from help
+    parser.add_argument("--ollama-model", metavar="NAME", help=argparse.SUPPRESS)
+    parser.add_argument("--ollama-host", default="http://127.0.0.1:11434", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     if args.behavior_probes and not args.ollama_model:
         print("error: --behavior-probes requires --ollama-model", file=sys.stderr)
         return 2
+    if args.behavior_probes:
+        print(
+            "note: runtime behavior probes are temporarily deferred; "
+            "prefer the manual VLM checklist in the report.",
+            file=sys.stderr,
+        )
 
     target = Path(args.target).expanduser().resolve()
     try:

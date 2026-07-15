@@ -6,8 +6,9 @@ to understand the handoff process.
 ## Your org setup
 
 - **AI department** runs **VLMs** (vision-language models).
-- They typically **pull models from Hugging Face** (repo ids like `google/gemma-4-E2B-it`).
+- They typically **pull models from Hugging Face**.
 - **You** scan first, then manually drop cleared files and notify them.
+- **Runtime auto-probes are deferred** — complete the behavior checklist manually for now.
 
 ## What this tool does (plain English)
 
@@ -16,7 +17,7 @@ Before the AI department opens a local model, you check:
 1. **File trickery** — some formats can run code when opened (especially old `.pt` pickles)
 2. **Wrong / swapped file** — SHA256 vs vendor/HF Hub digests
 3. **Wrong kind of model** — e.g. text-only repo when they need a VLM
-4. **Bad behavior** (checklist / optional probes) — including VLM image-injection style risks
+4. **Behavior checklist** — manual text + VLM checks you run in their environment later
 
 You always decide manually. Cleared files go into the drop folder by hand.
 
@@ -30,16 +31,10 @@ You always decide manually. Cleared files go into the drop folder by hand.
 
 ## For non-technical people
 
-### You need
-
-1. Python 3.9+ (`python3 --version`)
-2. This project folder (Download ZIP from GitHub)
-3. The model folder/files from Hugging Face (or a single `.gguf` / `.safetensors` file)
-
 ### Typical handoff (HF VLM)
 
 1. Get the Hugging Face repo name from the AI dept (example: `google/gemma-4-E2B-it`).
-2. Have IT/security download it into a folder (or download it yourself if that’s the process).
+2. Download it into a folder (or have IT do it).
 3. Scan the **folder**:
 
 ```bash
@@ -57,7 +52,7 @@ python3 model_scanner.py "/full/path/to/hf-folder" \
 ### Single-file scan
 
 ```bash
-python3 model_scanner.py "/full/path/to/your-model.gguf" \
+python3 model_scanner.py "/full/path/to/model.safetensors" \
   --report scan_report.json \
   --doc-report handoff_report.md
 ```
@@ -70,26 +65,24 @@ python3 model_scanner.py "/full/path/to/your-model.gguf" \
 
 | File | Role |
 |---|---|
-| `model_scanner.py` | Tier 1 + CLI orchestration |
-| `trust.py` | Tier 2 allowlist / hash / **HF Hub API** |
-| `behavior.py` | Tier 3 checklist (text + **VLM**) + Ollama probes |
+| `model_scanner.py` | Tier 1 + CLI + doc/JSON reports |
+| `trust.py` | Tier 2 allowlist / hash / HF Hub API |
+| `behavior.py` | Tier 3 **checklist** (runtime probes deferred) |
 | `config/publishers.allowlist.json` | Trusted publisher ids |
-| `probes/behavior_probes.json` | Fixed probe prompts / keywords |
 
-### CLI flags (HF / VLM oriented)
+### CLI flags (HF / VLM)
 
 | Flag | Purpose |
 |---|---|
 | `--hf-repo ORG/NAME` | Hub metadata + LFS sibling SHA256 compare |
-| `--modality vlm\|text` | Default **`vlm`**. Flags REVIEW if Hub lacks multimodal tags when `vlm` |
+| `--modality vlm\|text` | Default **`vlm`** |
 | `--publisher ID` | Must be allowlisted or REVIEW |
 | `--expected-sha256 HEX` | Explicit digest(s); mismatch → DANGEROUS |
-| `--manifest PATH.json` | Multi-file digest map for HF snapshots |
+| `--manifest PATH.json` | Multi-file digest map |
 | `--doc-report OUT.md` | Documentation / audit handoff report |
 | `--report OUT.json` | Machine-readable archive |
-| `--behavior-probes` + `--ollama-model` | Optional text probes after gate pass |
 
-### Recommended command for AI-dept HF VLM pulls
+### Recommended command
 
 ```bash
 huggingface-cli download ORG/NAME --local-dir ./incoming/NAME
@@ -102,7 +95,10 @@ python3 model_scanner.py ./incoming/NAME \
   --doc-report handoff_report.md
 ```
 
-Scan the **directory** so every safetensors shard / GGUF / mmproj / pickle is covered.
+### Deferred (do not rely on yet)
+
+- `--behavior-probes` / local inference auto-testing — **temporarily deferred**.
+  Use the printed **behavior checklist** and test in the AI dept’s VLM stack instead.
 
 ### Dev tests
 
@@ -114,18 +110,41 @@ pytest
 
 ---
 
-## Worked example: Gemma-class VLM from Hugging Face
+## Current limitations
 
-```bash
-huggingface-cli download google/gemma-4-E2B-it --local-dir ./incoming/gemma-4-E2B-it
-python3 model_scanner.py ./incoming/gemma-4-E2B-it \
-  --publisher google \
-  --hf-repo google/gemma-4-E2B-it \
-  --modality vlm \
-  -v --report scan_report.json --doc-report handoff_report.md
-```
+Honest boundaries of what this tool **does not** guarantee:
 
-Also supported: Ollama-local GGUF path for offline packs — see earlier Gemma 4 Ollama notes. Prefer Hub digests when AI dept’s source of truth is Hugging Face.
+1. **Not a complete malware scanner**  
+   Static / best-effort. Obfuscated pickle chains or novel opcodes can slip through → treat REVIEW seriously.
+
+2. **Hash / HF LFS match ≠ “clean weights”**  
+   Proves the file matches a published digest (anti-swap). It does **not** prove absence of a semantic / training-time backdoor inside otherwise valid tensors.
+
+3. **Publisher allowlist is policy, not proof**  
+   Being on `config/publishers.allowlist.json` only means *your org decided* that id is trusted enough to not auto-REVIEW. Compromised upstream accounts are still possible.
+
+4. **HF metadata needs network**  
+   `--hf-repo` fails soft to REVIEW if offline / rate-limited / private+ungated token missing. Sibling SHAs only exist when Hub exposes LFS digests.
+
+5. **VLM behavior is checklist-only (for now)**  
+   No automated image prompt-injection / OCR exfil runner yet. Runtime probes via local inference are **deferred**. You (or AI dept) must exercise the model in their stack.
+
+6. **Does not load or execute models (by design)**  
+   Good for analyst safety; means no behavioral proof from Tier 1/2 alone.
+
+7. **Format gaps**  
+   - ONNX: lightweight byte scan, not full protobuf validation  
+   - No first-class TensorFlow SavedModel / Keras H5 scanners (unlike ModelScan)  
+   - Tokenizer / `config.json` / processor files are not deeply validated (usually not RCE surfaces)
+
+8. **Directory scan only covers known model extensions**  
+   `.safetensors`, `.gguf`, `.pt`, `.pth`, `.bin`, `.ckpt`, `.pkl`, `.onnx` — not arbitrary scripts that might sit beside an HF repo (`*.py` custom code). Review those separately.
+
+9. **No continuous monitoring / auto-drop / auto-notify**  
+   Manual SOC workflow only — as requested.
+
+10. **Doc/JSON reports document checks, they are not a warranty**  
+    Sign-off is still a human decision.
 
 ---
 

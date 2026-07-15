@@ -2,48 +2,43 @@
 
 - **Generated:** 2026-07-15 00:00:00 UTC
 - **Scanner version:** 0.2.0
-- **Target:** `models/example-model/`
+- **Target:** `incoming/google-gemma-vlm/`
 - **Overall verdict:** **SAFE**
 - **Files:** 1 scanned — 1 SAFE, 0 REVIEW, 0 DANGEROUS
+- **Context:** AI department deploys **VLMs** typically pulled from **Hugging Face**.
 
 ## Executive summary
 
-No blocking file-format or integrity issues were reported for the scanned artifact(s). Analyst should still complete the behavior checklist (and any optional probes) before manual handoff to the AI department.
+No blocking file-format or integrity issues were reported for the scanned artifact(s). Analyst should still complete the behavior checklist before manual handoff to the AI department.
 
 ## Recommendation (manual process)
 
 1. Review findings below.
-2. Complete the behavior checklist (or attach probe results).
+2. Complete the behavior checklist (in the AI dept VLM stack).
 3. If cleared: **manually** copy files to the AI drop folder.
 4. **Manually** notify the AI department and attach this report (+ JSON if used).
 
 ---
 
-## File 1: `model.gguf`
+## File 1: `model.safetensors`
 
 | Field | Value |
 |---|---|
-| Path | `models/example-model/model.gguf` |
-| Format | `gguf` |
-| Size | 3,349,514,112 bytes |
-| SHA256 | `3646b4c147cd235a44d91df1546d3b7d8e29b547dbe4e1f80856419aa455e6fd` |
+| Path | `incoming/google-gemma-vlm/model.safetensors` |
+| Format | `safetensors` |
+| Size | 1,000,000,000 bytes |
+| SHA256 | `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` |
 | Verdict | **SAFE** |
 
 ### Provenance (Tier 2)
 
-- **Publisher:** ollama:library/gemma4
+- **Publisher:** google
 - **Allowlisted:** True
 - **Hash match:** True
-- **Expected SHA256:**
-  - `3646b4c147cd235a44d91df1546d3b7d8e29b547dbe4e1f80856419aa455e6fd`
-
-### Findings (Tier 1 / 2 / 3)
-
-| Severity | Detail |
-|---|---|
-| INFO | GGUF OK (version=3, tensors~541, kv~43). |
-| INFO | SHA256 matches expected digest. |
-| INFO | Publisher 'ollama:library/gemma4' is on the allowlist. |
+- **HF repo:** `google/example-vlm`
+- **Distribution:** huggingface
+- **Modality:** vlm
+- **HF multimodal signals:** True
 
 ### Behavior checklist (Tier 3 — manual)
 
@@ -54,6 +49,9 @@ Mark when completed by the analyst:
 - [ ] **pii_leakage** — PII leakage resistance
 - [ ] **prompt_injection** — Prompt-injection / tool-abuse resistance
 - [ ] **data_leak_training** — Training-data verbatim leak check
+- [ ] **vlm_visual_jailbreak** — VLM visual jailbreak resistance
+- [ ] **vlm_ocr_exfil** — VLM OCR / on-image secret exfil
+- [ ] **vlm_prompt_injection_image** — VLM image prompt-injection
 
 ---
 
