@@ -14,6 +14,8 @@
 
 Ollama-based automated probes are **temporarily deferred** (not part of the standard path).
 
+**Install:** `pip install -e .` for the stdlib-only core, or `pip install -e ".[onnx]"` to enable deep ONNX protobuf validation (recommended). See [`examples/DEMO.md`](examples/DEMO.md) for a live run against real models across all formats.
+
 | Verdict | Meaning | Action |
 |---|---|---|
 | **SAFE** | No blocking issues | Usually OK to proceed |
@@ -58,6 +60,8 @@ python3 model_scanner.py ./incoming/NAME \
 ```
 
 Scan the **directory** so every safetensors shard / checkpoint is covered.
+
+> Want to see it working first? [`examples/DEMO.md`](examples/DEMO.md) is a real end-to-end run: four benign models across all formats (SAFE), a hostile ONNX external-data escape (DANGEROUS), a live HF provenance check, and the all-tiers trust + audit-report flow.
 
 ### Useful flags
 
