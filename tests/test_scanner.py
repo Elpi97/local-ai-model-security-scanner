@@ -553,6 +553,176 @@ class TestOnnxOpDomains(unittest.TestCase):
         ), allow=frozenset({"evil.custom"}))
         self.assertTrue(any("exec_shell" in fd.detail for fd in r.findings))
 
+    def test_evil_domain_in_function_body_subgraph_is_dangerous(self) -> None:
+        """Non-standard domain nested in an If subgraph inside a model.functions body."""
+        inner = helper.make_graph(
+            [helper.make_node("CustomOp", ["x"], ["y"], domain="evil.custom")],
+            "fn_inner",
+            [helper.make_tensor_value_info("x", TensorProto.DataType.FLOAT, [1])],
+            [helper.make_tensor_value_info("y", TensorProto.DataType.FLOAT, [1])],
+        )
+        if_node = helper.make_node(
+            "If", ["cond"], ["y"], then_branch=inner, else_branch=inner, domain="",
+        )
+        fn = helper.make_function(
+            "my.domain", "my_fn", ["x", "cond"], ["y"], [if_node],
+            opset_imports=[helper.make_opsetid("", 18), helper.make_opsetid("my.domain", 1)],
+        )
+        r = self._scan(
+            self._write_model(
+                [helper.make_node("my_fn", ["x", "cond"], ["y"], domain="my.domain")],
+                functions=[fn],
+            ),
+            allow=frozenset({"my.domain"}),
+        )
+        self.assertEqual(r.verdict, "DANGEROUS")
+        self.assertTrue(any(
+            "evil.custom" in f.detail for f in r.findings if f.severity == "CRITICAL"
+        ))
+
+
+@unittest.skipUnless(_HAS_ONNX, "onnx package not installed")
+class TestOnnxWalkCaps(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmpdir.name)
+
+    def tearDown(self) -> None:
+        self._tmpdir.cleanup()
+
+    def _scan_path(self, path: Path):
+        import onnx_deep
+        result = ms.ScanResult(path=str(path), format="onnx", sha256="0",
+                               size_bytes=path.stat().st_size)
+        onnx_deep.scan(path, result, finding_cls=ms.Finding)
+        return result
+
+    def _nested_if_model(self, depth: int):
+        """Binary nested If: each level's then+else both wrap the next level."""
+        inner = helper.make_node("Identity", ["x"], ["y"])
+        for _ in range(depth):
+            sub = helper.make_graph(
+                [inner], "sub",
+                [helper.make_tensor_value_info("x", TensorProto.DataType.FLOAT, [1])],
+                [helper.make_tensor_value_info("y", TensorProto.DataType.FLOAT, [1])],
+            )
+            inner = helper.make_node(
+                "If", ["cond"], ["y"], then_branch=sub, else_branch=sub, domain="",
+            )
+        x = helper.make_tensor_value_info("x", TensorProto.DataType.FLOAT, [1])
+        cond = helper.make_tensor_value_info("cond", TensorProto.DataType.BOOL, [1])
+        y = helper.make_tensor_value_info("y", TensorProto.DataType.FLOAT, [1])
+        g = helper.make_graph([inner], "g", [cond, x], [y])
+        m = helper.make_model(g)
+        m.opset_import[0].version = 18
+        return m
+
+    def test_depth_12_nested_if_completes_fast(self) -> None:
+        import time
+        path = self.tmp / "deep12.onnx"
+        path.write_bytes(self._nested_if_model(12).SerializeToString())
+        t0 = time.perf_counter()
+        r = self._scan_path(path)
+        dt = time.perf_counter() - t0
+        self.assertLess(dt, 5.0)
+        self.assertTrue(any("ONNX nodes:" in f.detail for f in r.findings))
+
+    def test_node_budget_exceeded_adds_exactly_one_review(self) -> None:
+        """Node budget hit: walk stops, exactly one truncation REVIEW is added.
+
+        Built with MAX_WALK_NODES monkeypatched to 10 so a small real model
+        trips the budget; this is the cap that guards the 2^N nested-If DoS.
+        """
+        import onnx_deep
+        path = self.tmp / "deep12.onnx"
+        path.write_bytes(self._nested_if_model(12).SerializeToString())
+        import onnx
+        model = onnx.load(str(path), load_external_data=False)
+        result = ms.ScanResult(path=str(path), format="onnx", sha256="0",
+                               size_bytes=path.stat().st_size)
+        original = onnx_deep.MAX_WALK_NODES
+        onnx_deep.MAX_WALK_NODES = 10
+        try:
+            node_count = onnx_deep._check_domains(model, result, frozenset())
+        finally:
+            onnx_deep.MAX_WALK_NODES = original
+        self.assertLessEqual(node_count, 10)
+        reviews = [
+            f for f in result.findings
+            if f.severity == "REVIEW" and "exceeds scan cap" in f.detail
+        ]
+        self.assertEqual(len(reviews), 1)
+
+    def test_depth_cap_stops_walk_and_flags_truncation(self) -> None:
+        """Recursion deeper than MAX_WALK_DEPTH sets the truncation flag.
+
+        upb protobuf refuses to build/parse messages nested deeper than ~33
+        levels, so a real >100-deep graph cannot exist in this runtime; use a
+        mock with the GraphProto shape (.node / .attribute / .g / GRAPH type).
+        """
+        import onnx
+        import onnx_deep
+
+        class FakeAttr:
+            def __init__(self, g) -> None:
+                self.type = onnx.AttributeProto.AttributeType.GRAPH
+                self.g = g
+
+        class FakeNode:
+            def __init__(self, attr=None) -> None:
+                self.domain = ""
+                self.attribute = [attr] if attr is not None else []
+
+        # chain: graph level i holds one node whose GRAPH attr points to level i+1
+        leaf = FakeNode()
+
+        class FakeGraph:
+            def __init__(self) -> None:
+                self.node = []
+
+        deepest = FakeGraph()
+        deepest.node.append(leaf)
+        current = deepest
+        for _ in range(150):
+            parent = FakeGraph()
+            parent.node.append(FakeNode(FakeAttr(current)))
+            current = parent
+        budget: list[int] = [0]
+        truncated: list[bool] = [False]
+        nodes = list(onnx_deep._walk_nodes(current, 0, budget, truncated))
+        self.assertTrue(truncated[0])
+        self.assertLessEqual(len(nodes), onnx_deep.MAX_WALK_DEPTH + 2)
+        self.assertGreater(len(nodes), 50)  # real walk happened before the cap
+
+    def test_budget_bounds_shared_subgraph_walk(self) -> None:
+        """A shared subgraph is bounded by the node budget, not a visited-set.
+
+        Under upb, field accesses materialize fresh wrappers, so id()-based
+        dedupe is unsound and was removed; the DoS guard is MAX_WALK_NODES.
+        Walking the same graph object twice must stop at the budget.
+        """
+        import onnx_deep
+
+        def vi(name: str):
+            return helper.make_tensor_value_info(name, TensorProto.DataType.FLOAT, [1])
+
+        shared = helper.make_graph(
+            [helper.make_node("Relu", ["x"], ["y"])], "shared", [vi("x")], [vi("y")],
+        )
+        original = onnx_deep.MAX_WALK_NODES
+        onnx_deep.MAX_WALK_NODES = 3
+        try:
+            budget: list[int] = [0]
+            truncated: list[bool] = [False]
+            walks = [list(onnx_deep._walk_nodes(shared, 0, budget, truncated))
+                     for _ in range(4)]
+        finally:
+            onnx_deep.MAX_WALK_NODES = original
+        # Budget increments before each yield; MAX=3 allows 3 total nodes across
+        # all walks, then the 4th walk hits the cap and truncates.
+        self.assertEqual([len(w) for w in walks], [1, 1, 1, 0])
+        self.assertTrue(truncated[0])
+
 
 if __name__ == "__main__":
     unittest.main()

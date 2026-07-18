@@ -23,6 +23,12 @@ except ImportError:  # pragma: no cover - exercised in stdlib-only envs
 # Embedded raw tensor data larger than this is flagged REVIEW (content smuggling / bloat).
 MAX_EMBEDDED_RAW_BYTES: int = 100 * 1024 * 1024
 
+# Walk caps: bound subgraph recursion so hostile models cannot DoS the scanner.
+# A nested-If model serializes each branch as a copy, so depth N on disk can
+# expand to 2^N walked nodes; cap depth AND total nodes, then degrade to REVIEW.
+MAX_WALK_DEPTH: int = 100
+MAX_WALK_NODES: int = 100_000
+
 STANDARD_DOMAINS: frozenset[str] = frozenset({
     "", "ai.onnx", "ai.onnx.ml", "ai.onnx.preview.training",
 })
@@ -102,29 +108,78 @@ def _check_external_data(model: Any, model_dir: Path, result: Any) -> int:
     return count
 
 
-def _walk_nodes(graph: Any):
-    """Yield every node in graph, recursing into subgraph attributes."""
-    for node in graph.node:
-        yield node
-        for attr in node.attribute:
-            if attr.type == onnx.AttributeProto.AttributeType.GRAPH:
-                yield from _walk_nodes(attr.g)
-            elif attr.type == onnx.AttributeProto.AttributeType.GRAPHS:
-                for sub in attr.graphs:
-                    yield from _walk_nodes(sub)
+def _walk_nodes(
+    graph: Any,
+    _depth: int = 0,
+    _budget: list[int] | None = None,
+    _truncated: list[bool] | None = None,
+):
+    """Yield every node in graph, recursing into subgraph attributes.
+
+    Bounded two ways: ``MAX_WALK_DEPTH`` caps nesting depth and
+    ``MAX_WALK_NODES`` caps total yielded nodes. The budget is decremented
+    BEFORE recursing into each subgraph so a branching nested-If model
+    (2^N expansion) is stopped at the cap instead of exploding; when a cap
+    is hit the walk stops and ``_truncated[0]`` is set so the caller can
+    surface exactly one REVIEW. ``graph`` may be any object with a ``.node``
+    repeated field (GraphProto or FunctionProto).
+
+    NOTE: no id()-based visited-set. Under the upb protobuf runtime every
+    message-field access materializes a fresh wrapper, so object ids churn
+    and are recycled after temporaries die — an id() set both fails to dedupe
+    and can wrongly skip live graphs. The node budget is the real DoS guard.
+    """
+    if _budget is None:
+        _budget = [0]
+    if _truncated is None:
+        _truncated = [False]
+
+    def _walk(g: Any, depth: int) -> Any:
+        if _truncated[0]:
+            return
+        if depth > MAX_WALK_DEPTH:
+            _truncated[0] = True
+            return
+        for node in g.node:
+            if _budget[0] >= MAX_WALK_NODES:
+                _truncated[0] = True
+                return
+            _budget[0] += 1
+            yield node
+            for attr in node.attribute:
+                if _budget[0] >= MAX_WALK_NODES or _truncated[0]:
+                    _truncated[0] = _truncated[0] or _budget[0] >= MAX_WALK_NODES
+                    return
+                if attr.type == onnx.AttributeProto.AttributeType.GRAPH:
+                    yield from _walk(attr.g, depth + 1)
+                elif attr.type == onnx.AttributeProto.AttributeType.GRAPHS:
+                    for sub in attr.graphs:
+                        yield from _walk(sub, depth + 1)
+                if _truncated[0]:
+                    return
+
+    yield from _walk(graph, _depth)
 
 
 def _check_domains(model: Any, result: Any, allow_domains: frozenset[str]) -> int:
     """Flag non-standard op domains. Returns total node count."""
     seen: dict[str, int] = {}
     node_count = 0
-    for node in _walk_nodes(model.graph):
-        node_count += 1
+    # One shared walk budget across the main graph and every function body so
+    # a hostile model cannot spend the node budget twice.
+    budget: list[int] = [0]
+    truncated: list[bool] = [False]
+
+    def _tally(node: Any) -> None:
         seen[node.domain] = seen.get(node.domain, 0) + 1
+
+    for node in _walk_nodes(model.graph, 0, budget, truncated):
+        node_count += 1
+        _tally(node)
     for fn in model.functions:
-        for node in fn.node:
+        for node in _walk_nodes(fn, 0, budget, truncated):
             node_count += 1
-            seen[node.domain] = seen.get(node.domain, 0) + 1
+            _tally(node)
         lowered = fn.name.lower()
         for token in SUSPICIOUS_FUNCTION_TOKENS:
             if token in lowered:
@@ -134,6 +189,12 @@ def _check_domains(model: Any, result: Any, allow_domains: frozenset[str]) -> in
                     f"{token!r} (domain {fn.domain!r}).",
                 )
                 break
+    if truncated[0]:
+        result.add(
+            "REVIEW",
+            f"ONNX graph nesting/total nodes exceeds scan cap (depth>{MAX_WALK_DEPTH} "
+            f"or nodes>{MAX_WALK_NODES}); partial domain scan only — review manually.",
+        )
     for domain, count in sorted(seen.items()):
         if domain in STANDARD_DOMAINS:
             continue
