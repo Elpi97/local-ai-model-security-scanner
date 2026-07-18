@@ -104,6 +104,45 @@ Real metadata pulled live from the Hub. A SHA256 mismatch against the Hub LFS
 digest would be **DANGEROUS**; here the only flag is the unallowlisted
 publisher, so it's REVIEW.
 
+## 4. All three tiers together (trust + audit report)
+
+With an allowlisted publisher, an expected SHA256, and the HF repo, Tier 2
+confirms integrity and Tier 3 emits the audit handoff report:
+
+```bash
+python3 model_scanner.py /path/to/model.safetensors -v \
+  --publisher google \
+  --hf-repo hf-internal-testing/tiny-random-gpt2 \
+  --expected-sha256 8111d5af...b4e500 \
+  --doc-report handoff_report.md --report scan_report.json
+```
+
+```
+Verdict:    🚦 SAFE
+Provenance:
+     publisher:   google (allowlisted=True)
+     hash_match:  True
+     hf_repo:     hf-internal-testing/tiny-random-gpt2
+Findings:
+     [INFO] SHA256 matches expected digest: 8111d5af...
+     [INFO] Publisher 'google' is on the allowlist. Note: Google / DeepMind ...
+     [INFO] HF repo: downloads=1797655, gated=False, library=transformers.
+```
+
+The generated `handoff_report.md` is the audit artifact an analyst signs off:
+
+```markdown
+# Local AI Model Safety Scan Report
+- Scanner version: 0.3.0
+- Overall verdict: SAFE
+## Analyst sign-off
+| Analyst name |  |  Date |  |  Final decision | APPROVE / REJECT / ESCALATE |
+```
+
+- **Tier 1** file safety (all formats, incl. deep ONNX)
+- **Tier 2** trust & integrity — publisher allowlist + SHA256 vs expected / HF LFS
+- **Tier 3** behavior checklist + Markdown audit report for the handoff record
+
 ## Takeaway
 
 - **SAFE** across all four benign real models (safetensors, pytorch-zip, GGUF, ONNX).
