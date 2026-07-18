@@ -841,5 +841,53 @@ class TestOnnxIntegration(unittest.TestCase):
         self.assertTrue(any("max-read-bytes" in f.detail for f in result.findings))
 
 
+class TestDoctor(unittest.TestCase):
+    def _run(self, argv):
+        from unittest import mock
+        import io
+        import contextlib
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch("sys.argv", argv):
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = ms.cli()
+        return code, out.getvalue(), err.getvalue()
+
+    def test_doctor_exits_zero_and_reports(self) -> None:
+        code, out, _ = self._run(["model_scanner", "--doctor"])
+        self.assertEqual(code, 0)
+        self.assertIn("model-scanner doctor", out)
+        self.assertIn("version:", out)
+        self.assertIn("python:", out)
+        self.assertIn("onnx package:", out)
+        self.assertIn("deep ONNX scan:", out)
+        self.assertIn("verdict:", out)
+
+    def test_doctor_does_not_require_target(self) -> None:
+        code, out, _ = self._run(["model_scanner", "--doctor"])
+        self.assertEqual(code, 0)
+
+    def test_doctor_reports_enabled_when_onnx_works(self) -> None:
+        import onnx_deep
+        if not onnx_deep.HAS_ONNX:
+            self.skipTest("onnx not installed")
+        code, out, _ = self._run(["model_scanner", "--doctor"])
+        self.assertIn("ENABLED", out)
+        self.assertIn("install OK", out)
+
+    def test_doctor_reports_disabled_when_onnx_missing(self) -> None:
+        from unittest import mock
+        import io
+        import contextlib
+        out = io.StringIO()
+        with mock.patch("model_scanner.onnx_deep_mod") as mod:
+            mod.HAS_ONNX = False
+            with mock.patch("sys.argv", ["model_scanner", "--doctor"]), \
+                 contextlib.redirect_stdout(out):
+                code = ms.cli()
+        self.assertEqual(code, 0)
+        self.assertIn("DISABLED", out.getvalue())
+        self.assertIn("action needed", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

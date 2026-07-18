@@ -33,6 +33,38 @@ import behavior as behavior_mod
 import onnx_deep as onnx_deep_mod
 import trust as trust_mod
 
+
+def _check_onnx_import() -> tuple[bool, str]:
+    """Attempt a live `import onnx`; return (works, detail)."""
+    try:
+        import onnx as _onnx  # noqa: F401
+        return True, getattr(_onnx, "__version__", "unknown")
+    except Exception as e:  # doctor must never raise
+        return False, f"{type(e).__name__}: {e}"
+
+
+def run_doctor() -> int:
+    """Print install self-diagnosis. Always exits 0; never raises."""
+    import platform
+    print("model-scanner doctor")
+    print(f"  version:        {__version__}")
+    print(f"  python:         {platform.python_version()} ({sys.executable})")
+    print(f"  install:        {Path(__file__).resolve()}")
+    works, detail = _check_onnx_import()
+    if works and onnx_deep_mod.HAS_ONNX:
+        print(f"  onnx package:   present and working ({detail})")
+        print("  deep ONNX scan: ENABLED")
+        print("  verdict:        install OK")
+    elif not works and onnx_deep_mod.HAS_ONNX:
+        print(f"  onnx package:   present but BROKEN ({detail})")
+        print("  deep ONNX scan: DISABLED")
+        print('  verdict:        action needed: pip install --force-reinstall "onnx>=1.15"')
+    else:
+        print("  onnx package:   absent")
+        print("  deep ONNX scan: DISABLED")
+        print('  verdict:        action needed: pip install ".[onnx]" from the repo dir, or re-run install.sh')
+    return 0
+
 # Cap for formats that currently slur whole files / zip members into memory.
 # 0 via CLI means unlimited. Safetensors/GGUF use header-only reads and are uncapped here.
 DEFAULT_MAX_READ_BYTES: int = 512 * 1024 * 1024
@@ -811,7 +843,7 @@ def cli() -> int:
     parser = argparse.ArgumentParser(
         description="Local AI model safety scanner (file format + optional trust/behavior tiers).",
     )
-    parser.add_argument("target", help="Path to a model file or directory to scan.")
+    parser.add_argument("target", nargs="?", help="Path to a model file or directory to scan.")
     parser.add_argument("--report", metavar="OUT.json", help="Write a machine-readable JSON report.")
     parser.add_argument(
         "--doc-report",
@@ -866,7 +898,14 @@ def cli() -> int:
         default="http://127.0.0.1:11434",
         help=argparse.SUPPRESS,
     )
+    parser.add_argument("--doctor", action="store_true", help="Print install self-diagnosis and exit.")
     args = parser.parse_args()
+
+    if args.doctor:
+        return run_doctor()
+    if not args.target:
+        print("error: target is required (or use --doctor)", file=sys.stderr)
+        return 2
 
     if args.experimental_behavior_probes and not args.experimental_probe_model:
         print(
