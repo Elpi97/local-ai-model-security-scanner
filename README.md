@@ -9,7 +9,7 @@ before the AI department receives local model weights.
 
 Default scanning never loads or runs the model. Optional Ollama-style runtime probes are **temporarily deferred** (checklist + AI-dept vLLM testbed instead).
 
-**New in v0.3.0:** deep ONNX protobuf validation (external-data path escapes, recursive custom op-domain detection, embedded-initializer checks) via the optional `[onnx]` extra — the default install stays stdlib-only.
+**New in v0.4.0:** deep ONNX protobuf validation (external-data path escapes, recursive custom op-domain detection, embedded-initializer checks) via the optional `[onnx]` extra, a one-command installer, and `model-scanner --doctor` self-diagnosis. The default install stays stdlib-only.
 
 👉 **Start here:** **[HOW_TO_USE.md](HOW_TO_USE.md)**
 
