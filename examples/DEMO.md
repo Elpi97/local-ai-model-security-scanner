@@ -161,7 +161,7 @@ The generated `handoff_report.md` is the audit artifact an analyst signs off:
 
 ```markdown
 # Local AI Model Safety Scan Report
-- Scanner version: 0.3.0
+- Scanner version: 0.4.1
 - Overall verdict: SAFE
 ## Analyst sign-off
 | Analyst name |  |  Date |  |  Final decision | APPROVE / REJECT / ESCALATE |

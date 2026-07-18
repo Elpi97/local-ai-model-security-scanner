@@ -81,6 +81,17 @@ pip install -e ".[onnx]"    # or: pip install -e .  (stdlib-only core)
 Then verify: `model-scanner --doctor` (should report deep ONNX scan ENABLED).
 The core is stdlib-only (Python 3.9+); the `[onnx]` extra enables deep ONNX protobuf parsing. Windows: use the manual path (`install.sh` is POSIX).
 
+**Installer options** (`install.sh`):
+
+| Option / variable | Effect |
+|---|---|
+| `--stdlib` | Install without the `[onnx]` extra (deep ONNX scan disabled). |
+| `--uninstall` | Remove the venv and CLI symlink. |
+| `MODEL_SCANNER_HOME` | Install prefix (default `~/.local/share/model-scanner`). |
+| `MODEL_SCANNER_BIN` | Symlink dir for the CLI (default `~/.local/bin`). |
+
+Re-running `install.sh` upgrades in place.
+
 ## Quick start
 
 ```bash

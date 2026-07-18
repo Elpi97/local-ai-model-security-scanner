@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-18
 **Status:** Approved design
-**Target version:** 0.4.0
+**Target version:** 0.4.1 (shipped; doctor fix-line refined in 0.4.1)
 **Scope:** distribution & UX only — no changes to detection logic or severities.
 
 ## Problem
