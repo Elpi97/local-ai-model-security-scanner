@@ -58,12 +58,14 @@ def scan(
         return
     external_count = _check_external_data(model, path.parent, result)
     node_count = _check_domains(model, result, allow_domains)
+    init_count = _check_embedded_raw(model, result)
     if finding_cls is not None:
         _record_metadata(model, result, finding_cls)
         result.findings.append(
             finding_cls("INFO", f"ONNX external-data tensors: {external_count}")
         )
         result.findings.append(finding_cls("INFO", f"ONNX nodes: {node_count}"))
+        result.findings.append(finding_cls("INFO", f"ONNX initializers: {init_count}"))
 
 
 def _is_url(location: str) -> bool:
@@ -211,6 +213,21 @@ def _check_domains(model: Any, result: Any, allow_domains: frozenset[str]) -> in
                 "Pass --allow-onnx-domain only if the source is trusted.",
             )
     return node_count
+
+
+def _check_embedded_raw(model: Any, result: Any) -> int:
+    """Flag inline raw tensor data above MAX_EMBEDDED_RAW_BYTES. Returns initializer count."""
+    count = 0
+    for tensor in model.graph.initializer:
+        count += 1
+        if tensor.HasField("raw_data") and len(tensor.raw_data) > MAX_EMBEDDED_RAW_BYTES:
+            result.add(
+                "REVIEW",
+                f"ONNX initializer {tensor.name!r} embedded "
+                f"{len(tensor.raw_data):,} bytes inline (> {MAX_EMBEDDED_RAW_BYTES:,}); "
+                "possible content smuggling or bloat.",
+            )
+    return count
 
 
 def _record_metadata(model: Any, result: Any, finding_cls: Any) -> None:

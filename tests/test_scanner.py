@@ -724,5 +724,30 @@ class TestOnnxWalkCaps(unittest.TestCase):
         self.assertTrue(truncated[0])
 
 
+@unittest.skipUnless(_HAS_ONNX, "onnx package not installed")
+class TestOnnxEmbeddedRaw(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmpdir.name)
+
+    def tearDown(self) -> None:
+        self._tmpdir.cleanup()
+
+    def test_large_embedded_raw_is_review(self) -> None:
+        import onnx_deep
+        big = b"\x00" * (onnx_deep.MAX_EMBEDDED_RAW_BYTES + 1)
+        t = helper.make_tensor("blob", TensorProto.DataType.UINT8,
+                               [len(big)], big, raw=True)
+        g = helper.make_graph([], "g", [], [], initializer=[t])
+        m = helper.make_model(g)
+        path = self.tmp / "big.onnx"
+        path.write_bytes(m.SerializeToString())
+        result = ms.ScanResult(path=str(path), format="onnx", sha256="0",
+                               size_bytes=path.stat().st_size)
+        onnx_deep.scan(path, result, finding_cls=ms.Finding)
+        self.assertEqual(result.verdict, "REVIEW")
+        self.assertTrue(any("embedded" in f.detail.lower() for f in result.findings))
+
+
 if __name__ == "__main__":
     unittest.main()
