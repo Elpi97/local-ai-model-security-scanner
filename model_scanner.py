@@ -13,7 +13,7 @@ Exit codes: 0=SAFE, 1=DANGEROUS (or REVIEW with --strict), 2=error
 
 from __future__ import annotations
 
-__version__: str = "0.4.0"
+__version__: str = "0.4.1"
 
 
 import argparse
@@ -53,6 +53,10 @@ def run_doctor() -> int:
     print(f"  python:         {platform.python_version()} ({sys.executable})")
     print(f"  install:        {Path(__file__).resolve()}")
     works, detail = _check_onnx_import()
+    # The running install's own pip — correct whether the user arrived via
+    # install.sh (venv pip), uv, or a manual clone, so the fix line is always
+    # copy-pasteable for THIS environment.
+    pip = f'"{sys.executable}" -m pip'
     if works and onnx_deep_mod.HAS_ONNX:
         print(f"  onnx package:   present and working ({detail})")
         print("  deep ONNX scan: ENABLED")
@@ -73,11 +77,12 @@ def run_doctor() -> int:
         if findable:
             print(f"  onnx package:   present but BROKEN ({detail})")
             print("  deep ONNX scan: DISABLED")
-            print('  verdict:        action needed: pip install --force-reinstall "onnx>=1.15"')
+            print(f'  verdict:        action needed: {pip} install --force-reinstall "onnx>=1.15"')
         else:
             print("  onnx package:   absent")
             print("  deep ONNX scan: DISABLED")
-            print('  verdict:        action needed: pip install ".[onnx]" from the repo dir, or re-run install.sh')
+            print(f'  verdict:        action needed: {pip} install "onnx>=1.15",'
+                  " or re-run install.sh")
     return 0
 
 # Cap for formats that currently slur whole files / zip members into memory.
