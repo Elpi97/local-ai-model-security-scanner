@@ -749,5 +749,59 @@ class TestOnnxEmbeddedRaw(unittest.TestCase):
         self.assertTrue(any("embedded" in f.detail.lower() for f in result.findings))
 
 
+class TestOnnxIntegration(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmpdir.name)
+
+    def tearDown(self) -> None:
+        self._tmpdir.cleanup()
+
+    def _onnx_bytes(self) -> bytes:
+        if not _HAS_ONNX:
+            self.skipTest("onnx package not installed")
+        x = helper.make_tensor_value_info("x", TensorProto.DataType.FLOAT, [1])
+        y = helper.make_tensor_value_info("y", TensorProto.DataType.FLOAT, [1])
+        g = helper.make_graph([helper.make_node("Relu", ["x"], ["y"])], "g", [x], [y])
+        m = helper.make_model(g)
+        m.opset_import[0].version = 18
+        return m.SerializeToString()
+
+    def test_scan_file_uses_deep_path_when_available(self) -> None:
+        path = self.tmp / "m.onnx"
+        path.write_bytes(self._onnx_bytes())
+        result = ms.scan_file(path, verbose=False, allow_modules=frozenset())
+        self.assertEqual(result.verdict, "SAFE")
+        self.assertTrue(any("opset" in f.detail.lower() for f in result.findings))
+
+    def test_no_onnx_deep_flag_forces_fallback_info(self) -> None:
+        path = self.tmp / "m.onnx"
+        path.write_bytes(self._onnx_bytes())
+        result = ms.scan_file(path, verbose=False, allow_modules=frozenset(),
+                              onnx_deep=False)
+        self.assertTrue(any("fast path" in f.detail.lower()
+                            or "byte-level" in f.detail.lower() for f in result.findings))
+
+    def test_cli_allow_onnx_domain_repeatable(self) -> None:
+        from unittest import mock
+        path = self.tmp / "m.onnx"
+        path.write_bytes(self._onnx_bytes())
+        with mock.patch("sys.argv", [
+            "model_scanner", str(path),
+            "--allow-onnx-domain", "com.microsoft",
+            "--allow-onnx-domain", "acme.ops",
+        ]):
+            code = ms.cli()
+        self.assertEqual(code, 0)
+
+    def test_size_gate_precedes_deep_parse(self) -> None:
+        path = self.tmp / "big.onnx"
+        path.write_bytes(b"ONNX" + b"\x00" * 200)
+        result = ms.scan_file(path, verbose=False, allow_modules=frozenset(),
+                              max_read_bytes=64)
+        self.assertEqual(result.verdict, "REVIEW")
+        self.assertTrue(any("max-read-bytes" in f.detail for f in result.findings))
+
+
 if __name__ == "__main__":
     unittest.main()

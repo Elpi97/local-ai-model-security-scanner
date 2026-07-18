@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import behavior as behavior_mod
+import onnx_deep as onnx_deep_mod
 import trust as trust_mod
 
 # Cap for formats that currently slur whole files / zip members into memory.
@@ -364,6 +365,9 @@ def scan_onnx(
     path: Path,
     result: ScanResult,
     max_read_bytes: int = DEFAULT_MAX_READ_BYTES,
+    *,
+    deep: bool = True,
+    allow_onnx_domains: frozenset[str] = frozenset(),
 ) -> None:
     size = path.stat().st_size
     if _exceeds_max_read(size, max_read_bytes):
@@ -373,6 +377,22 @@ def scan_onnx(
             f"({max_read_bytes:,}); deep scan skipped to avoid memory exhaustion.",
         )
         return
+    if deep and onnx_deep_mod.HAS_ONNX:
+        onnx_deep_mod.scan(path, result, allow_domains=allow_onnx_domains,
+                           finding_cls=Finding)
+        return
+    if not deep and onnx_deep_mod.HAS_ONNX:
+        result.findings.append(Finding(
+            "INFO",
+            "Deep ONNX parse skipped via --no-onnx-deep (fast path); "
+            "byte-level heuristics applied.",
+        ))
+    elif not onnx_deep_mod.HAS_ONNX:
+        result.add(
+            "REVIEW",
+            "onnx package not installed; shallow byte-scan only. "
+            "Install model-scanner[onnx] for deep validation.",
+        )
     with open(path, "rb") as f:
         data = f.read()
     if b"external_data" in data or b"location" in data:
@@ -403,6 +423,8 @@ def scan_file(
     verbose: bool,
     allow_modules: frozenset[str],
     max_read_bytes: int = DEFAULT_MAX_READ_BYTES,
+    onnx_deep: bool = True,
+    allow_onnx_domains: frozenset[str] = frozenset(),
 ) -> ScanResult:
     fmt = sniff_format(path)
     result = ScanResult(path=str(path), format=fmt, sha256=sha256_of(path), size_bytes=path.stat().st_size)
@@ -416,7 +438,8 @@ def scan_file(
         elif fmt == "gguf":
             scan_gguf(path, result)
         elif fmt == "onnx":
-            scan_onnx(path, result, max_read_bytes=max_read_bytes)
+            scan_onnx(path, result, max_read_bytes=max_read_bytes,
+                      deep=onnx_deep, allow_onnx_domains=allow_onnx_domains)
         else:
             result.add("REVIEW", f"Unrecognized format '{fmt}' -- manual review required.")
     except Exception as e:
@@ -826,6 +849,11 @@ def cli() -> int:
             f"(default: {DEFAULT_MAX_READ_BYTES}). Use 0 for unlimited."
         ),
     )
+    parser.add_argument("--no-onnx-deep", dest="onnx_deep", action="store_false",
+                        help="Skip deep ONNX protobuf parse (byte-scan fast path).")
+    parser.add_argument("--allow-onnx-domain", action="append", default=[],
+                        metavar="DOMAIN",
+                        help="Downgrade a custom ONNX op domain from CRITICAL to REVIEW (repeatable).")
     # DEFERRED: optional experimental probes (not part of standard vLLM/HF handoff)
     parser.add_argument(
         "--experimental-behavior-probes",
@@ -872,7 +900,8 @@ def cli() -> int:
 
     allow_modules = frozenset(args.allow_module)
     results = [
-        scan_file(p, args.verbose, allow_modules, max_read_bytes=args.max_read_bytes)
+        scan_file(p, args.verbose, allow_modules, max_read_bytes=args.max_read_bytes,
+                  onnx_deep=args.onnx_deep, allow_onnx_domains=frozenset(args.allow_onnx_domain))
         for p in files
     ]
 
