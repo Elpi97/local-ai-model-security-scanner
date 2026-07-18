@@ -477,5 +477,82 @@ class TestOnnxExternalData(unittest.TestCase):
         self.assertFalse(any(f.severity == "CRITICAL" for f in r.findings))
 
 
+@unittest.skipUnless(_HAS_ONNX, "onnx package not installed")
+class TestOnnxOpDomains(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmpdir.name)
+
+    def tearDown(self) -> None:
+        self._tmpdir.cleanup()
+
+    def _write_model(self, nodes, functions=()) -> Path:
+        x = helper.make_tensor_value_info("x", TensorProto.DataType.FLOAT, [1])
+        y = helper.make_tensor_value_info("y", TensorProto.DataType.FLOAT, [1])
+        g = helper.make_graph(nodes, "g", [x], [y])
+        m = helper.make_model(g, functions=list(functions))
+        m.opset_import[0].version = 18
+        path = self.tmp / "m.onnx"
+        path.write_bytes(m.SerializeToString())
+        return path
+
+    def _scan(self, path: Path, allow: frozenset = frozenset()):
+        import onnx_deep
+        result = ms.ScanResult(path=str(path), format="onnx", sha256="0",
+                               size_bytes=path.stat().st_size)
+        onnx_deep.scan(path, result, allow_domains=allow, finding_cls=ms.Finding)
+        return result
+
+    def test_custom_domain_is_critical(self) -> None:
+        node = helper.make_node("CustomOp", ["x"], ["y"], domain="evil.custom")
+        r = self._scan(self._write_model([node]))
+        self.assertEqual(r.verdict, "DANGEROUS")
+
+    def test_custom_domain_in_subgraph_is_critical(self) -> None:
+        inner = helper.make_graph(
+            [helper.make_node("CustomOp", ["x"], ["y"], domain="evil.custom")],
+            "inner",
+            [helper.make_tensor_value_info("x", TensorProto.DataType.FLOAT, [1])],
+            [helper.make_tensor_value_info("y", TensorProto.DataType.FLOAT, [1])],
+        )
+        if_node = helper.make_node(
+            "If", ["cond"], ["y"],
+            then_branch=inner, else_branch=inner, domain="",
+        )
+        x = helper.make_tensor_value_info("x", TensorProto.DataType.FLOAT, [1])
+        cond = helper.make_tensor_value_info("cond", TensorProto.DataType.BOOL, [1])
+        y = helper.make_tensor_value_info("y", TensorProto.DataType.FLOAT, [1])
+        g = helper.make_graph([if_node], "g", [cond, x], [y])
+        m = helper.make_model(g)
+        m.opset_import[0].version = 18
+        path = self.tmp / "if.onnx"
+        path.write_bytes(m.SerializeToString())
+        r = self._scan(path)
+        self.assertEqual(r.verdict, "DANGEROUS")
+
+    def test_allowlisted_domain_is_review_not_critical(self) -> None:
+        node = helper.make_node("FusedOp", ["x"], ["y"], domain="com.microsoft")
+        r = self._scan(self._write_model([node]), allow=frozenset({"com.microsoft"}))
+        self.assertNotEqual(r.verdict, "DANGEROUS")
+        self.assertTrue(any("com.microsoft" in f.detail for f in r.findings))
+
+    def test_standard_domains_are_clean(self) -> None:
+        node = helper.make_node("Relu", ["x"], ["y"], domain="")
+        r = self._scan(self._write_model([node]))
+        self.assertFalse(any(f.severity == "CRITICAL" for f in r.findings))
+
+    def test_suspicious_function_name_is_review(self) -> None:
+        f = helper.make_function(
+            "evil.custom", "exec_shell", ["x"], ["y"],
+            [helper.make_node("Identity", ["x"], ["y"])],
+            opset_imports=[helper.make_opsetid("evil.custom", 1)],
+        )
+        r = self._scan(self._write_model(
+            [helper.make_node("exec_shell", ["x"], ["y"], domain="evil.custom")],
+            functions=[f],
+        ), allow=frozenset({"evil.custom"}))
+        self.assertTrue(any("exec_shell" in fd.detail for fd in r.findings))
+
+
 if __name__ == "__main__":
     unittest.main()
