@@ -62,6 +62,8 @@ python3 model_scanner.py /path/to/hf-snapshot -v \
   --report scan_report.json --doc-report handoff_report.md
 ```
 
+Default install is stdlib-only. For deep ONNX validation: pip install -e ".[onnx]".
+
 ## What Tier 1 checks
 
 | Format | Extensions | Check |
@@ -70,7 +72,7 @@ python3 model_scanner.py /path/to/hf-snapshot -v \
 | PyTorch zip | `.pt` `.pth` `.bin` | `data.pkl` + zip-slip |
 | Safetensors | `.safetensors` | Header / offsets (preferred for vLLM) |
 | GGUF | `.gguf` | Magic / version / sanity |
-| ONNX | `.onnx` | Path traversal / custom ops |
+| ONNX | `.onnx` | Path traversal / custom ops (deep protobuf parse with the [onnx] extra; byte-scan fallback otherwise) |
 
 ## Config & examples
 

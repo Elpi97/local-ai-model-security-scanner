@@ -424,5 +424,16 @@ class TestDefaultAllowlistExists(unittest.TestCase):
         self.assertGreaterEqual(len(probes), 6)
 
 
+class TestVersionAndPackaging(unittest.TestCase):
+    def test_version_is_0_3_0(self) -> None:
+        self.assertEqual(ms.__version__, "0.3.0")
+
+    def test_pyproject_declares_onnx_extra(self) -> None:
+        pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        text = pyproject.read_text(encoding="utf-8")
+        self.assertIn('onnx = ["onnx>=1.15"]', text)
+        self.assertIn('version = "0.3.0"', text)
+
+
 if __name__ == "__main__":
     unittest.main()

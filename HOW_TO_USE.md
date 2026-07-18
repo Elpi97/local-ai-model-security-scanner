@@ -68,7 +68,9 @@ Scan the **directory** so every safetensors shard / checkpoint is covered.
 | `--publisher ID` | Must be allowlisted or REVIEW |
 | `--expected-sha256 HEX` | Explicit digest; mismatch → DANGEROUS |
 | `--manifest PATH.json` | Multi-file digest map (prefer relative keys under the scan root) |
-| `--max-read-bytes N` | Cap full-memory reads for pickle/ONNX/zip members (default 512 MiB; `0` = unlimited) |
+| `--max-read-bytes N` | Cap full-memory reads for pickle/ONNX/zip members (default 512 MiB; `0` = unlimited) |
+| `--no-onnx-deep` | Skip deep ONNX protobuf parse (byte-scan fast path) |
+| `--allow-onnx-domain DOMAIN` | Downgrade a custom ONNX op domain from CRITICAL to REVIEW (repeatable) |
 | `--doc-report OUT.md` | Audit / handoff Markdown |
 | `--report OUT.json` | Machine-readable archive |
 
@@ -85,6 +87,7 @@ Scan the **directory** so every safetensors shard / checkpoint is covered.
 | `model_scanner.py` | Tier 1 + CLI |
 | `trust.py` | Publisher / hash / HF API |
 | `behavior.py` | Checklist (deferred probe helper remains optional/experimental) |
+| `onnx_deep.py` | Optional deep ONNX protobuf validation (onnx package) |
 
 ### Dev tests
 

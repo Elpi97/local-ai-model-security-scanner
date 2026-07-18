@@ -1,4 +1,5 @@
 # No runtime dependencies — Python 3.9+ stdlib only.
 # Optional: pip install -e ".[dev]"  for pytest + ruff
+# Optional: pip install -e ".[onnx]"  for deep ONNX protobuf validation (onnx>=1.15)
 # Config: config/publishers.allowlist.json
 # Probes: probes/behavior_probes.json

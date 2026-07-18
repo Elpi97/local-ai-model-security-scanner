@@ -13,7 +13,7 @@ Exit codes: 0=SAFE, 1=DANGEROUS (or REVIEW with --strict), 2=error
 
 from __future__ import annotations
 
-__version__: str = "0.2.0"
+__version__: str = "0.3.0"
 
 
 import argparse
