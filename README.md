@@ -95,7 +95,7 @@ Deep ONNX parse (with `[onnx]`): external-data escapes (`..`, absolute, URL) →
 ## Config & examples
 
 - [`config/publishers.allowlist.json`](config/publishers.allowlist.json)
-- [`examples/`](examples/)
+- [`examples/`](examples/) — including [`examples/DEMO.md`](examples/DEMO.md), a live run against real models (all formats, a caught hostile ONNX, and a real HF provenance check)
 
 ## Automated tests
 
