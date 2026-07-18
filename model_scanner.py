@@ -33,6 +33,8 @@ import behavior as behavior_mod
 import onnx_deep as onnx_deep_mod
 import trust as trust_mod
 
+_banner_shown = False
+
 
 def _check_onnx_import() -> tuple[bool, str]:
     """Attempt a live `import onnx`; return (works, detail)."""
@@ -406,6 +408,21 @@ def scan_gguf(path: Path, result: ScanResult) -> None:
     result.findings.append(Finding("INFO", f"GGUF OK (version={version}, tensors~{tensor_count}, kv~{kv_count})."))
 
 
+def _maybe_warn_onnx_fallback(deep: bool) -> None:
+    """Print a one-time stderr banner when ONNX deep-scan is unavailable."""
+    global _banner_shown
+    if _banner_shown or not deep:
+        return  # deliberate --no-onnx-deep: user opted into the fast path
+    if onnx_deep_mod.HAS_ONNX:
+        return  # deliberate --no-onnx-deep with working package: INFO finding covers it
+    _banner_shown = True
+    print(
+        "⚠ Deep ONNX scan DISABLED (onnx package unavailable) — byte-scan only.\n"
+        "  Install the [onnx] extra for full validation. Run: model-scanner --doctor",
+        file=sys.stderr,
+    )
+
+
 def scan_onnx(
     path: Path,
     result: ScanResult,
@@ -433,6 +450,7 @@ def scan_onnx(
             "byte-level heuristics applied.",
         ))
     elif not onnx_deep_mod.HAS_ONNX:
+        _maybe_warn_onnx_fallback(deep)
         result.add(
             "REVIEW",
             "onnx package not installed; shallow byte-scan only. "
@@ -853,6 +871,9 @@ def apply_tier3_probes(
 
 
 def cli() -> int:
+    global _banner_shown
+    _banner_shown = False
+
     parser = argparse.ArgumentParser(
         description="Local AI model safety scanner (file format + optional trust/behavior tiers).",
     )

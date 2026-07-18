@@ -919,5 +919,55 @@ class TestDoctor(unittest.TestCase):
         self.assertNotIn("BROKEN", out.getvalue())
 
 
+class TestFallbackBanner(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmpdir.name)
+
+    def tearDown(self) -> None:
+        self._tmpdir.cleanup()
+
+    def _write_onnx(self) -> Path:
+        p = self.tmp / "m.onnx"
+        p.write_bytes(b"ONNX" + b"\x00" * 64)
+        return p
+
+    def _run_cli(self, argv):
+        from unittest import mock
+        import contextlib
+        import io
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch("sys.argv", argv):
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = ms.cli()
+        return code, out.getvalue(), err.getvalue()
+
+    def test_banner_when_onnx_unavailable(self) -> None:
+        from unittest import mock
+        p = self._write_onnx()
+        with mock.patch("model_scanner.onnx_deep_mod") as mod:
+            mod.HAS_ONNX = False
+            code, _, err = self._run_cli(["model_scanner", str(p)])
+        self.assertIn("Deep ONNX scan DISABLED", err)
+        self.assertIn("--doctor", err)
+
+    def test_no_banner_with_no_onnx_deep_flag(self) -> None:
+        from unittest import mock
+        p = self._write_onnx()
+        with mock.patch("model_scanner.onnx_deep_mod") as mod:
+            mod.HAS_ONNX = True
+            code, _, err = self._run_cli(["model_scanner", str(p), "--no-onnx-deep"])
+        self.assertNotIn("Deep ONNX scan DISABLED", err)
+
+    def test_no_banner_when_no_onnx_files(self) -> None:
+        from unittest import mock
+        p = self.tmp / "m.pkl"
+        p.write_bytes(b"\x80\x04N.")
+        with mock.patch("model_scanner.onnx_deep_mod") as mod:
+            mod.HAS_ONNX = False
+            code, _, err = self._run_cli(["model_scanner", str(p)])
+        self.assertNotIn("Deep ONNX scan DISABLED", err)
+
+
 if __name__ == "__main__":
     unittest.main()
