@@ -401,5 +401,27 @@ class TestCliSmoke(unittest.TestCase):
         self.assertEqual(code, 1)
 
 
+class TestOnnxDeepSkeleton(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmpdir.name)
+
+    def tearDown(self) -> None:
+        self._tmpdir.cleanup()
+
+    def test_module_imports_and_exposes_has_onnx_flag(self) -> None:
+        import onnx_deep
+        self.assertIsInstance(onnx_deep.HAS_ONNX, bool)
+        self.assertTrue(callable(onnx_deep.scan))
+
+    def test_scan_never_raises_on_garbage_bytes(self) -> None:
+        import onnx_deep
+        path = self.tmp / "garbage.onnx"
+        path.write_bytes(b"\xde\xad\xbe\xef" * 64)
+        result = ms.ScanResult(path=str(path), format="onnx", sha256="0", size_bytes=256)
+        onnx_deep.scan(path, result)  # must not raise
+        self.assertIn(result.verdict, {"SAFE", "REVIEW"})
+
+
 if __name__ == "__main__":
     unittest.main()
