@@ -7,6 +7,8 @@ before the AI department receives local model weights.
 
 Default scanning never loads or runs the model. Optional Ollama-style runtime probes are **temporarily deferred** (checklist + AI-dept vLLM testbed instead).
 
+**New in v0.3.0:** deep ONNX protobuf validation (external-data path escapes, recursive custom op-domain detection, embedded-initializer checks) via the optional `[onnx]` extra — the default install stays stdlib-only.
+
 👉 **Start here:** **[HOW_TO_USE.md](HOW_TO_USE.md)**
 
 ## Analyst workflow (manual)
@@ -52,17 +54,24 @@ python3 model_scanner.py ./incoming/gemma-2-2b-it \
 | **REVIEW** | Unusual / unallowlisted / HF unreachable — investigate |
 | **DANGEROUS** | Code-exec risk or hash mismatch — do not hand off |
 
-## Quick start
+## Installation
 
 ```bash
 git clone https://github.com/Elpi97/local-ai-model-security-scanner.git
 cd local-ai-model-security-scanner
+pip install -e .            # stdlib-only core
+pip install -e ".[onnx]"    # + deep ONNX protobuf validation (onnx>=1.15)
+```
+
+The core is **stdlib-only** (Python 3.9+). The `[onnx]` extra enables deep ONNX protobuf parsing; without it, ONNX files get the byte-scan fallback flagged REVIEW so weak coverage is always visible.
+
+## Quick start
+
+```bash
 python3 model_scanner.py /path/to/hf-snapshot -v \
   --hf-repo ORG/NAME --publisher ORG \
   --report scan_report.json --doc-report handoff_report.md
 ```
-
-Default install is stdlib-only. For deep ONNX validation: pip install -e ".[onnx]".
 
 ## What Tier 1 checks
 
@@ -73,6 +82,15 @@ Default install is stdlib-only. For deep ONNX validation: pip install -e ".[onnx
 | Safetensors | `.safetensors` | Header / offsets (preferred for vLLM) |
 | GGUF | `.gguf` | Magic / version / sanity |
 | ONNX | `.onnx` | Path traversal / custom ops (deep protobuf parse with the [onnx] extra; byte-scan fallback otherwise) |
+
+### ONNX deep-scan flags
+
+| Flag | Purpose |
+|---|---|
+| `--no-onnx-deep` | Skip deep protobuf parse (byte-scan fast path; INFO note, not REVIEW). |
+| `--allow-onnx-domain DOMAIN` | Downgrade a custom op domain from CRITICAL to REVIEW (repeatable). |
+
+Deep ONNX parse (with `[onnx]`): external-data escapes (`..`, absolute, URL) → DANGEROUS; non-standard op domains (recursive through `If`/`Loop`/`Scan` subgraphs and function bodies) → DANGEROUS; allowlisted domains / suspicious function names / >100 MiB embedded initializers → REVIEW.
 
 ## Config & examples
 
