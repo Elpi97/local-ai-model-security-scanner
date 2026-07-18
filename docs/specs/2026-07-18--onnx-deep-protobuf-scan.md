@@ -174,6 +174,13 @@ Test models are built in-memory with `onnx.helper.make_tensor`,
 
 - Corrupt/truncated protobuf (`onnx.load` raising `onnx.parser.ParseError`
   or similar) → REVIEW ("could not parse as ONNX protobuf"), never a crash.
+- **Loading MUST use `onnx.load(path, load_external_data=False)`.** onnx
+  ≥1.16 validates external-data locations inside `onnx.load()` itself and
+  raises on traversal/absolute paths — which would convert our CRITICAL
+  findings into parse-error REVIEWs. Loading without external data preserves
+  the hostile `location` entries for `_check_external_data` to inspect.
+  (Discovered during Task 2 implementation; the kwarg exists since ~onnx 1.8,
+  so the `onnx>=1.15` floor is safe.)
 - Any unexpected exception inside `onnx_deep.scan` → caught at the existing
   `scan_file` boundary → REVIEW ("Scanner error while processing file").
   The scanner never exits non-2 due to its own failure on a single file.
