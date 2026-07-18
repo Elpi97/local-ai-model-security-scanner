@@ -13,6 +13,14 @@ Default scanning never loads or runs the model. Optional Ollama-style runtime pr
 
 👉 **Start here:** **[HOW_TO_USE.md](HOW_TO_USE.md)**
 
+## See it in action
+
+![End-to-end scan: doctor OK, real safetensors SAFE (exit 0), hostile ONNX DANGEROUS (exit 1), 94/94 tests passed](assets/e2e-demo.gif)
+
+Live replay of the scanner gate: install self-check → trusted Hugging Face safetensors clears as **SAFE** → hostile ONNX external-data escape is blocked as **DANGEROUS** → full suite **94/94** passing.
+
+Full commands and evidence: [`examples/DEMO.md`](examples/DEMO.md).
+
 ## Analyst workflow (manual)
 
 ```
