@@ -46,12 +46,58 @@ def scan(
         )
         return
     try:
-        model = onnx.load(str(path))
+        model = onnx.load(str(path), load_external_data=False)
     except Exception as e:
         result.add("REVIEW", f"Could not parse ONNX protobuf: {type(e).__name__}: {e}")
         return
+    external_count = _check_external_data(model, path.parent, result)
     if finding_cls is not None:
         _record_metadata(model, result, finding_cls)
+        result.findings.append(
+            finding_cls("INFO", f"ONNX external-data tensors: {external_count}")
+        )
+
+
+def _is_url(location: str) -> bool:
+    return location.lower().startswith(URL_SCHEMES)
+
+
+def _check_external_data(model: Any, model_dir: Path, result: Any) -> int:
+    """Flag external-data locations escaping model_dir. Returns tensor count."""
+    count = 0
+    for tensor in model.graph.initializer:
+        if tensor.data_location != TensorProto.DataLocation.EXTERNAL:
+            continue
+        count += 1
+        location = ""
+        for entry in tensor.external_data:
+            if entry.key == "location":
+                location = entry.value
+                break
+        if not location:
+            continue
+        loc_path = Path(location)
+        if (
+            _is_url(location)
+            or loc_path.is_absolute()
+            or ".." in loc_path.parts
+        ):
+            result.add(
+                "CRITICAL",
+                f"ONNX external_data location escapes model dir: "
+                f"{location!r} (tensor {tensor.name!r}).",
+            )
+            continue
+        resolved = (model_dir / loc_path).resolve()
+        try:
+            resolved.relative_to(model_dir.resolve())
+        except ValueError:
+            result.add(
+                "CRITICAL",
+                f"ONNX external_data location resolves outside scan root: "
+                f"{location!r} (tensor {tensor.name!r}).",
+            )
+    return count
 
 
 def _record_metadata(model: Any, result: Any, finding_cls: Any) -> None:

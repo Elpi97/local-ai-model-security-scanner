@@ -423,5 +423,59 @@ class TestOnnxDeepSkeleton(unittest.TestCase):
         self.assertIn(result.verdict, {"SAFE", "REVIEW"})
 
 
+try:
+    import onnx as onnx  # noqa: F401
+    from onnx import TensorProto, helper
+    _HAS_ONNX = True
+except ImportError:
+    _HAS_ONNX = False
+
+
+@unittest.skipUnless(_HAS_ONNX, "onnx package not installed")
+class TestOnnxExternalData(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmpdir.name)
+
+    def tearDown(self) -> None:
+        self._tmpdir.cleanup()
+
+    def _model_with_external(self, location: str) -> bytes:
+        t = helper.make_tensor("w", TensorProto.DataType.FLOAT, [1], [0.0])
+        t.data_location = TensorProto.DataLocation.EXTERNAL
+        del t.external_data[:]
+        t.external_data.add(key="location", value=location)
+        t.external_data.add(key="offset", value="0")
+        t.external_data.add(key="length", value="4")
+        g = helper.make_graph([], "g", [], [], initializer=[t])
+        m = helper.make_model(g)
+        return m.SerializeToString()
+
+    def _scan(self, location: str):
+        import onnx_deep
+        path = self.tmp / "m.onnx"
+        path.write_bytes(self._model_with_external(location))
+        result = ms.ScanResult(path=str(path), format="onnx", sha256="0",
+                               size_bytes=path.stat().st_size)
+        onnx_deep.scan(path, result, finding_cls=ms.Finding)
+        return result
+
+    def test_relative_path_traversal_is_critical(self) -> None:
+        r = self._scan("../escape.bin")
+        self.assertEqual(r.verdict, "DANGEROUS")
+
+    def test_absolute_path_is_critical(self) -> None:
+        r = self._scan("/etc/passwd")
+        self.assertEqual(r.verdict, "DANGEROUS")
+
+    def test_url_location_is_critical(self) -> None:
+        r = self._scan("https://evil.example.com/x.bin")
+        self.assertEqual(r.verdict, "DANGEROUS")
+
+    def test_local_external_file_is_not_critical(self) -> None:
+        r = self._scan("weights.bin")
+        self.assertFalse(any(f.severity == "CRITICAL" for f in r.findings))
+
+
 if __name__ == "__main__":
     unittest.main()
