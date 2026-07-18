@@ -879,14 +879,44 @@ class TestDoctor(unittest.TestCase):
         import io
         import contextlib
         out = io.StringIO()
-        with mock.patch("model_scanner.onnx_deep_mod") as mod:
-            mod.HAS_ONNX = False
-            with mock.patch("sys.argv", ["model_scanner", "--doctor"]), \
-                 contextlib.redirect_stdout(out):
-                code = ms.cli()
+        with mock.patch("model_scanner._check_onnx_import", return_value=(False, "ModuleNotFoundError")), \
+             mock.patch("importlib.util.find_spec", return_value=None), \
+             mock.patch("sys.argv", ["model_scanner", "--doctor"]), \
+             contextlib.redirect_stdout(out):
+            code = ms.cli()
         self.assertEqual(code, 0)
         self.assertIn("DISABLED", out.getvalue())
         self.assertIn("action needed", out.getvalue())
+
+    def test_doctor_distinguishes_broken_onnx(self) -> None:
+        """A findable-but-unimportable onnx must report BROKEN, not absent."""
+        from unittest import mock
+        import io
+        import contextlib
+        out = io.StringIO()
+        with mock.patch("model_scanner._check_onnx_import", return_value=(False, "ModuleNotFoundError: no C ext")), \
+             mock.patch("importlib.util.find_spec", return_value=object()), \
+             mock.patch("sys.argv", ["model_scanner", "--doctor"]), \
+             contextlib.redirect_stdout(out):
+            code = ms.cli()
+        self.assertEqual(code, 0)
+        self.assertIn("BROKEN", out.getvalue())
+        self.assertIn("--force-reinstall", out.getvalue())
+
+    def test_doctor_distinguishes_absent_onnx(self) -> None:
+        """An unfindable onnx must report absent, not BROKEN."""
+        from unittest import mock
+        import io
+        import contextlib
+        out = io.StringIO()
+        with mock.patch("model_scanner._check_onnx_import", return_value=(False, "ModuleNotFoundError")), \
+             mock.patch("importlib.util.find_spec", return_value=None), \
+             mock.patch("sys.argv", ["model_scanner", "--doctor"]), \
+             contextlib.redirect_stdout(out):
+            code = ms.cli()
+        self.assertEqual(code, 0)
+        self.assertIn("absent", out.getvalue())
+        self.assertNotIn("BROKEN", out.getvalue())
 
 
 if __name__ == "__main__":

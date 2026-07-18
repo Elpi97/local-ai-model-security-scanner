@@ -55,14 +55,27 @@ def run_doctor() -> int:
         print(f"  onnx package:   present and working ({detail})")
         print("  deep ONNX scan: ENABLED")
         print("  verdict:        install OK")
-    elif not works and onnx_deep_mod.HAS_ONNX:
-        print(f"  onnx package:   present but BROKEN ({detail})")
-        print("  deep ONNX scan: DISABLED")
-        print('  verdict:        action needed: pip install --force-reinstall "onnx>=1.15"')
+    elif works:
+        # Imports fine but onnx_deep's guard failed (shouldn't happen; belt-and-braces).
+        print(f"  onnx package:   present and working ({detail})")
+        print("  deep ONNX scan: ENABLED")
+        print("  verdict:        install OK")
     else:
-        print("  onnx package:   absent")
-        print("  deep ONNX scan: DISABLED")
-        print('  verdict:        action needed: pip install ".[onnx]" from the repo dir, or re-run install.sh')
+        # Import failed. Distinguish broken (findable but unimportable) from absent
+        # via find_spec — a broken C extension still leaves the package findable.
+        import importlib.util
+        try:
+            findable = importlib.util.find_spec("onnx") is not None
+        except Exception:
+            findable = False
+        if findable:
+            print(f"  onnx package:   present but BROKEN ({detail})")
+            print("  deep ONNX scan: DISABLED")
+            print('  verdict:        action needed: pip install --force-reinstall "onnx>=1.15"')
+        else:
+            print("  onnx package:   absent")
+            print("  deep ONNX scan: DISABLED")
+            print('  verdict:        action needed: pip install ".[onnx]" from the repo dir, or re-run install.sh')
     return 0
 
 # Cap for formats that currently slur whole files / zip members into memory.
