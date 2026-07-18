@@ -476,6 +476,44 @@ class TestOnnxExternalData(unittest.TestCase):
         r = self._scan("weights.bin")
         self.assertFalse(any(f.severity == "CRITICAL" for f in r.findings))
 
+    def test_duplicate_location_last_evil_is_critical(self) -> None:
+        """onnx loaders resolve the LAST location entry; first-safe/second-evil must not scan SAFE."""
+        t = helper.make_tensor("w", TensorProto.DataType.FLOAT, [1], [0.0])
+        t.data_location = TensorProto.DataLocation.EXTERNAL
+        del t.external_data[:]
+        t.external_data.add(key="location", value="weights.bin")
+        t.external_data.add(key="offset", value="0")
+        t.external_data.add(key="length", value="4")
+        t.external_data.add(key="location", value="../escape.bin")
+        g = helper.make_graph([], "g", [], [], initializer=[t])
+        m = helper.make_model(g)
+        path = self.tmp / "dup.onnx"
+        path.write_bytes(m.SerializeToString())
+        result = ms.ScanResult(path=str(path), format="onnx", sha256="0",
+                               size_bytes=path.stat().st_size)
+        import onnx_deep
+        onnx_deep.scan(path, result, finding_cls=ms.Finding)
+        self.assertEqual(result.verdict, "DANGEROUS")
+
+    def test_duplicate_location_all_safe_is_not_critical(self) -> None:
+        """Duplicate safe locations must not false-positive."""
+        t = helper.make_tensor("w", TensorProto.DataType.FLOAT, [1], [0.0])
+        t.data_location = TensorProto.DataLocation.EXTERNAL
+        del t.external_data[:]
+        t.external_data.add(key="location", value="weights.bin")
+        t.external_data.add(key="offset", value="0")
+        t.external_data.add(key="length", value="4")
+        t.external_data.add(key="location", value="shard/weights2.bin")
+        g = helper.make_graph([], "g", [], [], initializer=[t])
+        m = helper.make_model(g)
+        path = self.tmp / "dup_safe.onnx"
+        path.write_bytes(m.SerializeToString())
+        result = ms.ScanResult(path=str(path), format="onnx", sha256="0",
+                               size_bytes=path.stat().st_size)
+        import onnx_deep
+        onnx_deep.scan(path, result, finding_cls=ms.Finding)
+        self.assertFalse(any(f.severity == "CRITICAL" for f in result.findings))
+
 
 @unittest.skipUnless(_HAS_ONNX, "onnx package not installed")
 class TestOnnxOpDomains(unittest.TestCase):

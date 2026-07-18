@@ -79,34 +79,35 @@ def _check_external_data(model: Any, model_dir: Path, result: Any) -> int:
         if tensor.data_location != TensorProto.DataLocation.EXTERNAL:
             continue
         count += 1
-        location = ""
+        locations: list[str] = []
         for entry in tensor.external_data:
             if entry.key == "location":
-                location = entry.value
+                locations.append(entry.value)
+        if not locations:
+            continue
+        for location in locations:
+            loc_path = Path(location)
+            if (
+                _is_url(location)
+                or loc_path.is_absolute()
+                or ".." in loc_path.parts
+            ):
+                result.add(
+                    "CRITICAL",
+                    f"ONNX external_data location escapes model dir: "
+                    f"{location!r} (tensor {tensor.name!r}).",
+                )
                 break
-        if not location:
-            continue
-        loc_path = Path(location)
-        if (
-            _is_url(location)
-            or loc_path.is_absolute()
-            or ".." in loc_path.parts
-        ):
-            result.add(
-                "CRITICAL",
-                f"ONNX external_data location escapes model dir: "
-                f"{location!r} (tensor {tensor.name!r}).",
-            )
-            continue
-        resolved = (model_dir / loc_path).resolve()
-        try:
-            resolved.relative_to(model_dir.resolve())
-        except ValueError:
-            result.add(
-                "CRITICAL",
-                f"ONNX external_data location resolves outside scan root: "
-                f"{location!r} (tensor {tensor.name!r}).",
-            )
+            resolved = (model_dir / loc_path).resolve()
+            try:
+                resolved.relative_to(model_dir.resolve())
+            except ValueError:
+                result.add(
+                    "CRITICAL",
+                    f"ONNX external_data location resolves outside scan root: "
+                    f"{location!r} (tensor {tensor.name!r}).",
+                )
+                break
     return count
 
 
