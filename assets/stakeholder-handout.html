@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  @page {
+    size: A4;
+    margin: 0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    color: #1a1a2e;
+    line-height: 1.55;
+    font-size: 13px;
+  }
+  .page {
+    page-break-after: always;
+    padding: 48px 56px;
+    min-height: 100vh;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  /* Cover page */
+  .cover {
+    background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #1a1a2e 100%);
+    color: #e6edf3;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    min-height: 100vh;
+    padding: 60px;
+  }
+  .cover .shield {
+    font-size: 64px;
+    margin-bottom: 24px;
+  }
+  .cover h1 {
+    font-size: 36px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    letter-spacing: -0.5px;
+  }
+  .cover .subtitle {
+    font-size: 18px;
+    color: #8b949e;
+    margin-bottom: 40px;
+    max-width: 500px;
+  }
+  .cover .meta {
+    font-size: 13px;
+    color: #6e7681;
+    margin-top: 48px;
+  }
+  .cover .repo-link {
+    font-size: 14px;
+    color: #58a6ff;
+    margin-top: 8px;
+    font-family: 'SF Mono', Monaco, Consolas, monospace;
+  }
+
+  /* Section headers */
+  h2 {
+    font-size: 20px;
+    font-weight: 700;
+    color: #0d1117;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #d0d7de;
+  }
+  h3 {
+    font-size: 15px;
+    font-weight: 600;
+    color: #1a1a2e;
+    margin-top: 20px;
+    margin-bottom: 8px;
+  }
+
+  /* Threat callout */
+  .callout {
+    background: #fff8e1;
+    border-left: 4px solid #f59e0b;
+    padding: 16px 20px;
+    border-radius: 6px;
+    margin: 16px 0;
+    font-size: 13px;
+  }
+  .callout strong { color: #92400e; }
+
+  .danger-callout {
+    background: #fef2f2;
+    border-left: 4px solid #dc2626;
+    padding: 16px 20px;
+    border-radius: 6px;
+    margin: 16px 0;
+  }
+  .danger-callout strong { color: #991b1b; }
+
+  .safe-callout {
+    background: #f0fdf4;
+    border-left: 4px solid #16a34a;
+    padding: 16px 20px;
+    border-radius: 6px;
+    margin: 16px 0;
+  }
+  .safe-callout strong { color: #15803d; }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 12px;
+  }
+  th {
+    background: #0d1117;
+    color: #e6edf3;
+    padding: 8px 12px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  td {
+    padding: 8px 12px;
+    border-bottom: 1px solid #d0d7de;
+    vertical-align: top;
+  }
+  tr:nth-child(even) td { background: #f6f8fa; }
+
+  /* Code blocks */
+  pre {
+    background: #0d1117;
+    color: #e6edf3;
+    padding: 16px 20px;
+    border-radius: 8px;
+    font-family: 'SF Mono', Monaco, Consolas, 'Courier New', monospace;
+    font-size: 11.5px;
+    line-height: 1.5;
+    overflow-x: auto;
+    margin: 12px 0;
+  }
+  .prompt { color: #8b949e; }
+  .ok { color: #3fb950; font-weight: 600; }
+  .warn { color: #d29922; font-weight: 600; }
+  .err { color: #f85149; font-weight: 600; }
+  .blue { color: #58a6ff; }
+
+  /* Workflow diagram */
+  .workflow {
+    background: #f6f8fa;
+    border-radius: 8px;
+    padding: 24px;
+    margin: 16px 0;
+    text-align: center;
+  }
+  .workflow pre {
+    text-align: left;
+    margin: 0;
+  }
+
+  /* Badges */
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-right: 6px;
+  }
+  .badge-critical { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+  .badge-review { background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
+  .badge-safe { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+
+  /* Lists */
+  ul, ol {
+    margin: 8px 0 8px 24px;
+  }
+  li {
+    margin-bottom: 6px;
+  }
+
+  .footer-note {
+    font-size: 11px;
+    color: #6e7681;
+    margin-top: 32px;
+    padding-top: 12px;
+    border-top: 1px solid #d0d7de;
+    font-style: italic;
+  }
+
+  .two-col {
+    display: flex;
+    gap: 24px;
+  }
+  .two-col > div { flex: 1; }
+</style>
+</head>
+<body>
+
+<!-- COVER PAGE -->
+<div class="page cover">
+  <div class="shield">🛡️</div>
+  <h1>model-scanner</h1>
+  <div class="subtitle">Static Security Scanner for AI Model Weights<br>Before Hugging Face → vLLM Handoff</div>
+  <div style="font-size: 14px; color: #8b949e; margin-top: 24px; max-width: 460px; line-height: 1.7;">
+    A first-line defense that inspects model files without loading them —<br>
+    catching hostile payloads, path escapes, and untrusted publishers<br>
+    before they reach your AI infrastructure.
+  </div>
+  <div class="meta">Version 0.4.1 · Python 3.9+ · Zero runtime dependencies</div>
+  <div class="repo-link">github.com/Elpi97/local-ai-model-security-scanner</div>
+</div>
+
+<!-- PAGE 2: THE PROBLEM -->
+<div class="page">
+  <h2>The Problem</h2>
+
+  <div class="callout">
+    <strong>The attack surface:</strong> We download model weights from Hugging Face and hand them to vLLM for serving. Those weights are <em>opaque binary files</em> — pickle, safetensors, ONNX, GGUF. A hostile or compromised model file can execute arbitrary code the moment it's loaded. <strong>There is no first-line check today.</strong>
+  </div>
+
+  <h3>Why this matters</h3>
+  <ul>
+    <li><strong>Pickle deserialization is a known RCE vector.</strong> A crafted pickle can call <code>os.system()</code>, <code>subprocess.Popen()</code>, or any arbitrary function during <code>torch.load()</code> — the exact call vLLM makes.</li>
+    <li><strong>Hugging Face has had malicious model incidents.</strong> The platform is open — anyone can publish. Publisher reputation is not a guarantee.</li>
+    <li><strong>Safetensors and ONNX have their own attack vectors:</strong> path traversal via external-data references, zip-slip in PyTorch checkpoints, header manipulation in safetensors.</li>
+    <li><strong>The attack fires at load time</strong> — once vLLM calls <code>torch.load()</code> or <code>onnx.load()</code>, it's already too late.</li>
+  </ul>
+
+  <h3>The gap in existing tools</h3>
+  <table>
+    <tr>
+      <th>Tool</th>
+      <th>What it does</th>
+      <th>Why it's not enough</th>
+    </tr>
+    <tr>
+      <td><code>weights_only=True</code></td>
+      <td>PyTorch's restricted unpickler</td>
+      <td>Only blocks <em>some</em> pickle attacks. Doesn't cover safetensors, ONNX, or zip-slip. No audit trail.</td>
+    </tr>
+    <tr>
+      <td>Hugging Face scanning</td>
+      <td>Signature-based malware check on upload</td>
+      <td>Catches <em>known</em> malware. Misses novel payloads. No structural analysis.</td>
+    </tr>
+    <tr>
+      <td>ClamAV / YARA</td>
+      <td>Generic antivirus</td>
+      <td>Doesn't understand model file formats. Can't check publisher provenance or ONNX graph structure.</td>
+    </tr>
+    <tr>
+      <td>Manual review</td>
+      <td>Human inspects the file</td>
+      <td>Doesn't scale. No consistency guarantee. No audit record.</td>
+    </tr>
+  </table>
+
+  <div class="footer-note">
+    model-scanner fills this gap: structural static analysis + provenance verification + audit trail, with zero dependencies, running before the model reaches vLLM.
+  </div>
+</div>
+
+<!-- PAGE 3: THE SOLUTION -->
+<div class="page">
+  <h2>The Solution — Three Tiers</h2>
+
+  <p style="margin-bottom: 16px;">
+    model-scanner is a static security scanner that runs <strong>before</strong> the model reaches vLLM. It <strong>never loads the model</strong> — it inspects the bytes, validates provenance, and produces an audit-trail report with a clear verdict.
+  </p>
+
+  <table>
+    <tr>
+      <th style="width: 20%;">Tier</th>
+      <th style="width: 45%;">What it checks</th>
+      <th style="width: 35%;">Analogy</th>
+    </tr>
+    <tr>
+      <td><strong>1 — File Safety</strong><br><span class="badge badge-critical">CRITICAL</span> <span class="badge badge-review">REVIEW</span></td>
+      <td>
+        Does the file contain hidden code, path escapes, or hostile structures?<br>
+        <em>Pickle opcode analysis, ONNX deep protobuf parse, safetensors header validation, GGUF magic check, PyTorch zip-slip detection.</em>
+      </td>
+      <td>We don't open the package — we X-ray it.</td>
+    </tr>
+    <tr>
+      <td><strong>2 — Trust & Integrity</strong><br><span class="badge badge-review">REVIEW</span> <span class="badge badge-safe">SAFE</span></td>
+      <td>
+        Who published it? Does the hash match? Is the publisher allowlisted?<br>
+        <em>SHA-256 verification, Hugging Face publisher allowlist, LFS digest comparison, manifest validation.</em>
+      </td>
+      <td>Checking the return address and the seal.</td>
+    </tr>
+    <tr>
+      <td><strong>3 — Behavior Checklist</strong><br><span class="badge badge-review">Manual</span></td>
+      <td>
+        Does the model refuse harmful requests?<br>
+        <em>Deferred to the AI department's vLLM testbed. The scanner attaches a checklist to every report so the analyst signs off.</em>
+      </td>
+      <td>Interviewing the candidate before hiring.</td>
+    </tr>
+  </table>
+
+  <h3>Verdicts</h3>
+  <div class="two-col">
+    <div>
+      <p><span class="badge badge-safe">SAFE</span> All Tier 1 checks passed, publisher allowlisted (or review accepted), hash matches.</p>
+      <p><span class="badge badge-review">REVIEW</span> Something needs human attention — unallowlisted publisher, unusual structure, or shallow scan (deep parse unavailable). Not necessarily dangerous.</p>
+    </div>
+    <div>
+      <p><span class="badge badge-critical">DANGEROUS</span> A concrete threat was found — path escape, dangerous code reference, hostile op domain. <strong>Do not hand off.</strong></p>
+      <p style="font-size: 11px; color: #6e7681;">Exit code 1 = DANGEROUS, 0 = SAFE/REVIEW. CI-integrable.</p>
+    </div>
+  </div>
+
+  <h3>Key design principles</h3>
+  <ul>
+    <li><strong>Never load the artifact being scanned.</strong> All analysis is static — pickle opcode disassembly, protobuf parsing, header inspection. No <code>torch.load()</code>, no <code>onnx.load()</code> with execution.</li>
+    <li><strong>Zero runtime dependencies.</strong> Pure Python 3.9+ stdlib. The optional <code>[onnx]</code> extra enables deep ONNX parsing but isn't required.</li>
+    <li><strong>Audit trail on every scan.</strong> Markdown report with analyst sign-off table, JSON for CI/CD. Every finding is traceable to a file, a line, and a check.</li>
+    <li><strong>Honest severity tiers.</strong> The report explicitly states what was checked and what wasn't. No silent gaps.</li>
+  </ul>
+</div>
+
+<!-- PAGE 4: THE DEMO -->
+<div class="page">
+  <h2>Live Demo — 60 Seconds</h2>
+
+  <h3>Step 1: Install</h3>
+  <pre><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/Elpi97/local-ai-model-security-scanner/main/install.sh | bash
+<span class="ok">✓ model-scanner installed to ~/.local/share/model-scanner</span>
+<span class="ok">✓ CLI available at ~/.local/bin/model-scanner</span>
+
+<span class="prompt">$</span> model-scanner --doctor
+model-scanner 0.4.1 — install self-diagnosis
+  Python:     3.11.x
+  onnx:       present and working (1.22.0)
+  deep scan:  <span class="ok">ENABLED</span>
+  <span class="ok">✓ Your install is OK.</span></pre>
+
+  <h3>Step 2: Scan a real model (SAFE)</h3>
+  <pre><span class="prompt">$</span> model-scanner gpt2/model.safetensors --hf-repo gpt2 --publisher openai
+<span class="ok">🚦 SAFE</span> — gpt2/model.safetensors
+  Tier 1: safetensors header OK (64 tensors)
+  Tier 2: publisher "openai" allowlisted, SHA-256 verified
+  Tier 3: behavior checklist attached (6 items, manual)
+
+Report: gpt2/model.safetensors.report.md</pre>
+
+  <h3>Step 3: Catch a hostile model (DANGEROUS)</h3>
+  <pre><span class="prompt">$</span> model-scanner trojan.onnx
+<span class="err">🛑 DANGEROUS</span> — trojan.onnx
+  <span class="err">CRITICAL:</span> ONNX external-data location '../../../../etc/passwd'
+           escapes model directory — path traversal attack.
+  <span class="err">CRITICAL:</span> Non-standard op domain "evil.custom" — not in standard
+           domains (ai.onnx, ai.onnx.ml, ai.onnx.preview.training).
+
+Exit code: 1
+Report: trojan.onnx.report.md (see audit trail)</pre>
+
+  <div class="danger-callout">
+    <strong>What just happened:</strong> The scanner detected a path-traversal attack in the ONNX model's external-data reference — without loading the model. The <code>../../../../etc/passwd</code> path would have been followed by vLLM's ONNX loader, potentially leaking system files. The scan took <strong>under 1 second</strong>.
+  </div>
+</div>
+
+<!-- PAGE 5: WORKFLOW INTEGRATION -->
+<div class="page">
+  <h2>How It Fits the Workflow</h2>
+
+  <div class="workflow">
+  <pre>  Hugging Face Hub
+      │
+      │  (analyst downloads)
+      ▼
+  ┌─────────────────────────────┐
+  │  Analyst's Machine          │
+  │  <span class="blue">model-scanner</span> <file>           │
+  │                             │
+  │  <span class="ok">SAFE</span> ──────────────────┐       │
+  │  <span class="warn">REVIEW</span> ──── investigate    │       │
+  │  <span class="err">DANGEROUS</span> ── do NOT hand off  │       │
+  └─────────────────────────────┘       │
+                                        │
+      ┌─────────────────────────────────┘
+      ▼
+  ┌─────────────────────────────┐
+  │  AI Department (vLLM)       │
+  │  Receives only SAFE models  │
+  │  + audit-trail report       │
+  └─────────────────────────────┘</pre>
+  </div>
+
+  <h3>Key integration points</h3>
+  <ul>
+    <li><strong>Runs on the analyst's machine, not in the serving pipeline.</strong> Zero latency impact on vLLM. The AI dept only receives files that passed the scan.</li>
+    <li><strong>The audit-trail report travels with the model.</strong> The AI dept can verify what was checked, by whom, and when. Sign-off table included in every Markdown report.</li>
+    <li><strong>Exit codes are CI/CD-friendly.</strong> Exit 1 = DANGEROUS (block), 0 = SAFE or REVIEW (proceed with awareness). Integrates with any pipeline that checks exit codes.</li>
+    <li><strong>Drop-folder workflow.</strong> The analyst scans, reviews the report, and moves SAFE files to the drop folder the AI dept picks up. No API integration required — works with existing file-based workflows.</li>
+  </ul>
+
+  <h3>What it catches</h3>
+  <div class="two-col">
+    <div>
+      <ul>
+        <li>Pickle RCE payloads (dangerous globals, <code>os.system</code> calls, <code>__reduce__</code> tricks)</li>
+        <li>ONNX external-data path escapes (<code>../etc/passwd</code>, URLs, absolute paths)</li>
+        <li>Non-standard ONNX op domains (custom malicious ops)</li>
+        <li>PyTorch zip-slip (path traversal in checkpoint archives)</li>
+      </ul>
+    </div>
+    <div>
+      <ul>
+        <li>Safetensors header manipulation</li>
+        <li>GGUF format tampering</li>
+        <li>Publisher spoofing, hash mismatches</li>
+        <li>Oversized embedded initializers (potential data smuggling)</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>What it doesn't catch (yet)</h3>
+  <ul>
+    <li><strong>Runtime behavioral issues</strong> — the model <em>says</em> harmful things. Tier 3 is a manual checklist, not automated. This belongs in the AI dept's vLLM testbed.</li>
+    <li><strong>Adversarial weights</strong> — mathematically perturbed to misbehave. No static scanner can detect these; it's a research problem.</li>
+    <li><strong>Novel attack vectors in future format versions</strong> — the scanner tracks current format specs. New formats or versions may need new checks.</li>
+  </ul>
+
+  <div class="callout">
+    <strong>Why this honesty matters:</strong> Overstating a security tool's coverage is worse than understating it. Every report explicitly lists what was checked and what wasn't — no silent gaps.
+  </div>
+</div>
+
+<!-- PAGE 6: OBJECTIONS + GETTING STARTED -->
+<div class="page">
+  <h2>Handling Likely Objections</h2>
+
+  <table>
+    <tr>
+      <th style="width: 30%;">Objection</th>
+      <th style="width: 70%;">Response</th>
+    </tr>
+    <tr>
+      <td>"vLLM already uses <code>weights_only=True</code>"</td>
+      <td>That blocks <em>some</em> pickle attacks but not all (safetensors, ONNX, zip-slip are unaffected). Defense in depth — this catches it <em>before</em> it reaches the loader, with an audit record.</td>
+    </tr>
+    <tr>
+      <td>"Can't we just use Hugging Face's scanning?"</td>
+      <td>HF scans for <em>known</em> malware signatures. This does <em>structural static analysis</em> — it catches novel payloads HF hasn't seen yet. Different threat model.</td>
+    </tr>
+    <tr>
+      <td>"Will this slow down our pipeline?"</td>
+      <td>It runs in &lt;1s per file on the analyst's machine, not in the serving path. The AI dept never sees it. Zero latency impact on vLLM.</td>
+    </tr>
+    <tr>
+      <td>"Why not just use ClamAV / YARA?"</td>
+      <td>Those are generic signature-based AV. This understands model file formats (pickle opcodes, ONNX protobuf, safetensors headers) and checks ML-specific threats (publisher provenance, external-data escapes, custom op domains).</td>
+    </tr>
+    <tr>
+      <td>"Who maintains it?"</td>
+      <td>Stdlib-only Python, 94 tests, zero runtime deps. Low maintenance burden. The optional <code>[onnx]</code> extra is from the official ONNX project.</td>
+    </tr>
+    <tr>
+      <td>"What if it flags a legitimate model?"</td>
+      <td>REVIEW is not DANGEROUS — it means "investigate." The analyst looks at the finding, decides, and signs off in the audit report. DANGEROUS is reserved for concrete threats.</td>
+    </tr>
+  </table>
+
+  <h2>Getting Started</h2>
+
+  <pre><span class="prompt">#</span> One-command install (creates isolated venv, installs with [onnx] extra)
+curl -fsSL https://raw.githubusercontent.com/Elpi97/local-ai-model-security-scanner/main/install.sh | bash
+
+<span class="prompt">#</span> Verify your install
+model-scanner --doctor
+
+<span class="prompt">#</span> Scan a model file
+model-scanner path/to/model.safetensors --hf-repo org/model-name --publisher org-name
+
+<span class="prompt">#</span> Scan with expected hash (Tier 2 integrity)
+model-scanner model.onnx --expected-sha256 abc123...
+
+<span class="prompt">#</span> Allow a custom ONNX op domain
+model-scanner model.onnx --allow-onnx-domain com.mycompany
+
+<span class="prompt">#</span> Generate a full audit-trail report
+model-scanner model_dir/ --doc-report --publisher my-org --allowlist config/publishers.json</pre>
+
+  <h3>Resources</h3>
+  <table>
+    <tr>
+      <th style="width: 25%;">Document</th>
+      <th style="width: 75%;">Purpose</th>
+    </tr>
+    <tr>
+      <td><strong>README.md</strong></td>
+      <td>What it is, installation, flags, quick start — the elevator pitch</td>
+    </tr>
+    <tr>
+      <td><strong>HOW_TO_USE.md</strong></td>
+      <td>Operator guide — all flags, all formats, examples</td>
+    </tr>
+    <tr>
+      <td><strong>examples/DEMO.md</strong></td>
+      <td>Live end-to-end demo with screenshot — proof it works on real models</td>
+    </tr>
+    <tr>
+      <td><strong>Releases (v0.4.1)</strong></td>
+      <td>Changelog — what changed, maturity signal</td>
+    </tr>
+  </table>
+
+  <div class="footer-note">
+    Repository: github.com/Elpi97/local-ai-model-security-scanner · Version 0.4.1 · MIT License
+  </div>
+</div>
+
+</body>
+</html>
