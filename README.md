@@ -1,3 +1,5 @@
+<img width="1024" height="576" alt="social-preview" src="https://github.com/user-attachments/assets/9173c810-49f3-432d-b8ef-baaec986185c" />
+
 # Local AI Model Safety Scanner
 
 A Python CLI for cybersecurity analysts who are the **first line of defense**
