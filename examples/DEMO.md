@@ -5,6 +5,34 @@ every format Tier 1 handles — plus a deliberately hostile ONNX model and a rea
 Hugging Face provenance check. Nothing here is synthetic test fixtures; the
 benign models are actual published weights.
 
+## 0. Install & verify (60 seconds)
+
+The fastest way in — one command, then confirm it worked:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Elpi97/local-ai-model-security-scanner/main/install.sh | bash
+model-scanner --doctor
+```
+
+```
+✓ model-scanner installed.
+  Verify:   model-scanner --doctor
+
+model-scanner doctor
+  version:        0.4.1
+  python:         3.9.6 (~/.local/share/model-scanner/venv/bin/python3)
+  install:        ~/.local/share/model-scanner/venv/.../model_scanner.py
+  onnx package:   present and working (1.19.1)
+  deep ONNX scan: ENABLED
+  verdict:        install OK
+```
+
+`--doctor` tells you the install is healthy (`install OK`) or prints the exact
+fix — e.g. if the `onnx` package is missing or broken, it names the precise
+`pip` command for *your* environment. If you ever scan an ONNX file without the
+deep-scan package, the scanner prints a one-time stderr banner pointing you
+back to `--doctor` so weak coverage is never silent.
+
 ## The models
 
 | File | Format | Size | Source |

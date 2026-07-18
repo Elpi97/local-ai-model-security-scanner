@@ -9,7 +9,7 @@ before the AI department receives local model weights.
 
 Default scanning never loads or runs the model. Optional Ollama-style runtime probes are **temporarily deferred** (checklist + AI-dept vLLM testbed instead).
 
-**New in v0.4.0:** deep ONNX protobuf validation (external-data path escapes, recursive custom op-domain detection, embedded-initializer checks) via the optional `[onnx]` extra, a one-command installer, and `model-scanner --doctor` self-diagnosis. The default install stays stdlib-only.
+**New in v0.4.x:** deep ONNX protobuf validation (external-data path escapes, recursive custom op-domain detection, embedded-initializer checks) via the optional `[onnx]` extra; a one-command installer; `model-scanner --doctor` self-diagnosis; and a loud stderr banner if weak ONNX coverage ever slips through. The default install stays stdlib-only.
 
 👉 **Start here:** **[HOW_TO_USE.md](HOW_TO_USE.md)**
 
@@ -105,6 +105,9 @@ python3 model_scanner.py /path/to/hf-snapshot -v \
 |---|---|
 | `--no-onnx-deep` | Skip deep protobuf parse (byte-scan fast path; INFO note, not REVIEW). |
 | `--allow-onnx-domain DOMAIN` | Downgrade a custom op domain from CRITICAL to REVIEW (repeatable). |
+| `--doctor` | Print install self-diagnosis (onnx present/absent/broken, deep-scan on/off, exact fix) and exit. No target needed. |
+
+If you scan an ONNX file without the deep-scan package, a one-time stderr banner tells you to run `--doctor` — weak coverage is never silent.
 
 Deep ONNX parse (with `[onnx]`): external-data escapes (`..`, absolute, URL) → DANGEROUS; non-standard op domains (recursive through `If`/`Loop`/`Scan` subgraphs and function bodies) → DANGEROUS; allowlisted domains / suspicious function names / >100 MiB embedded initializers → REVIEW.
 

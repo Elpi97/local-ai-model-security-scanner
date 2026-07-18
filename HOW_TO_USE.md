@@ -75,6 +75,7 @@ Scan the **directory** so every safetensors shard / checkpoint is covered.
 | `--max-read-bytes N` | Cap full-memory reads for pickle/ONNX/zip members (default 512 MiB; `0` = unlimited) |
 | `--no-onnx-deep` | Skip deep ONNX protobuf parse (byte-scan fast path) |
 | `--allow-onnx-domain DOMAIN` | Downgrade a custom ONNX op domain from CRITICAL to REVIEW (repeatable) |
+| `--doctor` | Print install self-diagnosis (onnx present/absent/broken, deep-scan on/off, exact fix) and exit |
 | `--doc-report OUT.md` | Audit / handoff Markdown |
 | `--report OUT.json` | Machine-readable archive |
 
