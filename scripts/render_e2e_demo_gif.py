@@ -55,6 +55,14 @@ def read_evidence(filename: str, required: Iterable[str]) -> str:
     return text
 
 
+def load_exit_code(filename: str, expected: str) -> str:
+    path = LOG_DIR / filename
+    code = path.read_text(encoding="utf-8").strip()
+    if code != expected:
+        raise ValueError(f"{path} expected exit code {expected!r}, got {code!r}")
+    return code
+
+
 def load_chapters() -> tuple[Chapter, ...]:
     doctor = read_evidence(
         "01-doctor.txt",
@@ -74,9 +82,11 @@ def load_chapters() -> tuple[Chapter, ...]:
         ),
     )
     tests = read_evidence("06-tests.txt", ("collected 94 items", "94 passed"))
+    benign_exit = load_exit_code("03-benign-exit-code.txt", "0")
+    hostile_exit = load_exit_code("05-hostile-exit-code.txt", "1")
 
     # Keep the displayed excerpts deterministic while proving every claim against
-    # the captured command output above. Exit codes are part of the demo commands.
+    # the captured command output above. Exit codes come from captured log files.
     assert doctor and benign and hostile and tests
     return (
         Chapter(
@@ -105,7 +115,7 @@ def load_chapters() -> tuple[Chapter, ...]:
                 "     [INFO] Safetensors header OK (64 tensors).",
                 "",
                 "Verdict:    SAFE",
-                "exit code: 0",
+                f"exit code: {benign_exit}",
             ),
             COLORS["green"],
             4_000,
@@ -122,7 +132,7 @@ def load_chapters() -> tuple[Chapter, ...]:
                 "     [INFO] ONNX external-data tensors: 1",
                 "",
                 "Verdict:    DANGEROUS",
-                "exit code: 1",
+                f"exit code: {hostile_exit}",
             ),
             COLORS["red"],
             4_800,
@@ -255,9 +265,12 @@ def draw_frame(state: FrameState) -> Image.Image:
 
         y = 168
         for line in state.lines:
-            if "[CRITICAL]" in line or "DANGEROUS" in line or line == "exit code: 1":
+            if "[CRITICAL]" in line or "DANGEROUS" in line:
                 color = COLORS["red"]
-            elif "SAFE" in line or line == "exit code: 0":
+            elif line.startswith("exit code:"):
+                code = line.removeprefix("exit code:").strip()
+                color = COLORS["green"] if code == "0" else COLORS["red"]
+            elif "SAFE" in line:
                 color = COLORS["green"]
             elif "94 passed" in line:
                 color = COLORS["yellow"]
