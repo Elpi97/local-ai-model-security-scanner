@@ -58,14 +58,28 @@ python3 model_scanner.py ./incoming/gemma-2-2b-it \
 
 ## Installation
 
+**Easiest (one command)** — isolated install with deep ONNX scan included:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Elpi97/local-ai-model-security-scanner/main/install.sh | bash
+```
+
+**With [uv](https://docs.astral.sh/uv/):**
+
+```bash
+uv tool install --with onnx "git+https://github.com/Elpi97/local-ai-model-security-scanner"
+```
+
+**Manual (from a clone):**
+
 ```bash
 git clone https://github.com/Elpi97/local-ai-model-security-scanner.git
 cd local-ai-model-security-scanner
-pip install -e .            # stdlib-only core
-pip install -e ".[onnx]"    # + deep ONNX protobuf validation (onnx>=1.15)
+pip install -e ".[onnx]"    # or: pip install -e .  (stdlib-only core)
 ```
 
-The core is **stdlib-only** (Python 3.9+). The `[onnx]` extra enables deep ONNX protobuf parsing; without it, ONNX files get the byte-scan fallback flagged REVIEW so weak coverage is always visible.
+Then verify: `model-scanner --doctor` (should report deep ONNX scan ENABLED).
+The core is stdlib-only (Python 3.9+); the `[onnx]` extra enables deep ONNX protobuf parsing. Windows: use the manual path (`install.sh` is POSIX).
 
 ## Quick start
 

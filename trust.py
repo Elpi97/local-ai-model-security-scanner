@@ -127,7 +127,7 @@ def fetch_hf_metadata(repo_id: str, timeout: float = 15.0) -> dict[str, Any]:
     if not validate_hf_repo_id(repo_id):
         raise ValueError(f"Invalid Hugging Face repo id: {repo_id!r}")
     url = f"https://huggingface.co/api/models/{repo_id}"
-    req = urllib.request.Request(url, headers={"User-Agent": "model-scanner/0.3"})
+    req = urllib.request.Request(url, headers={"User-Agent": "model-scanner/0.4"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read().decode("utf-8")
     data = json.loads(raw)

@@ -13,7 +13,7 @@ Exit codes: 0=SAFE, 1=DANGEROUS (or REVIEW with --strict), 2=error
 
 from __future__ import annotations
 
-__version__: str = "0.3.0"
+__version__: str = "0.4.0"
 
 
 import argparse
@@ -413,8 +413,6 @@ def _maybe_warn_onnx_fallback(deep: bool) -> None:
     global _banner_shown
     if _banner_shown or not deep:
         return  # deliberate --no-onnx-deep: user opted into the fast path
-    if onnx_deep_mod.HAS_ONNX:
-        return  # deliberate --no-onnx-deep with working package: INFO finding covers it
     _banner_shown = True
     print(
         "⚠ Deep ONNX scan DISABLED (onnx package unavailable) — byte-scan only.\n"

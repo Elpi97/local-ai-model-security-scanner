@@ -425,14 +425,21 @@ class TestDefaultAllowlistExists(unittest.TestCase):
 
 
 class TestVersionAndPackaging(unittest.TestCase):
-    def test_version_is_0_3_0(self) -> None:
-        self.assertEqual(ms.__version__, "0.3.0")
+    def test_version_is_0_4_0(self) -> None:
+        self.assertEqual(ms.__version__, "0.4.0")
 
     def test_pyproject_declares_onnx_extra(self) -> None:
         pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
         text = pyproject.read_text(encoding="utf-8")
         self.assertIn('onnx = ["onnx>=1.15"]', text)
-        self.assertIn('version = "0.3.0"', text)
+        self.assertIn('version = "0.4.0"', text)
+
+    def test_readme_documents_oneliner_install(self) -> None:
+        readme = Path(__file__).resolve().parent.parent / "README.md"
+        text = readme.read_text(encoding="utf-8")
+        self.assertIn("install.sh", text)
+        self.assertIn("uv tool install", text)
+        self.assertIn("--doctor", text)
 
 
 if __name__ == "__main__":

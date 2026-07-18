@@ -14,7 +14,7 @@
 
 Ollama-based automated probes are **temporarily deferred** (not part of the standard path).
 
-**Install:** `pip install -e .` for the stdlib-only core, or `pip install -e ".[onnx]"` to enable deep ONNX protobuf validation (recommended). See [`examples/DEMO.md`](examples/DEMO.md) for a live run against real models across all formats.
+**Install:** one command: `curl -fsSL https://raw.githubusercontent.com/Elpi97/local-ai-model-security-scanner/main/install.sh | bash` (includes deep ONNX scan), or see README for uv/manual options. Verify with `model-scanner --doctor`. See [`examples/DEMO.md`](examples/DEMO.md) for a live run against real models across all formats.
 
 | Verdict | Meaning | Action |
 |---|---|---|
