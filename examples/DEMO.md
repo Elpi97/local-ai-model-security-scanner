@@ -14,6 +14,8 @@ curl -fsSL https://raw.githubusercontent.com/Elpi97/local-ai-model-security-scan
 model-scanner --doctor
 ```
 
+![End-to-end terminal run: install, --doctor, SAFE scans, and a caught DANGEROUS model](../assets/demo-terminal.png)
+
 ```
 ✓ model-scanner installed.
   Verify:   model-scanner --doctor
