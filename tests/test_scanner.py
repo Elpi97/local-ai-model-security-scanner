@@ -969,5 +969,23 @@ class TestFallbackBanner(unittest.TestCase):
         self.assertNotIn("Deep ONNX scan DISABLED", err)
 
 
+class TestInstallScript(unittest.TestCase):
+    def test_install_script_exists_executable_and_parses(self) -> None:
+        import os
+        import subprocess
+        script = Path(__file__).resolve().parent.parent / "install.sh"
+        self.assertTrue(script.is_file(), "install.sh missing")
+        self.assertTrue(os.access(script, os.X_OK), "install.sh not executable")
+        r = subprocess.run(["bash", "-n", str(script)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, f"bash syntax error: {r.stderr}")
+
+    def test_install_script_supports_help(self) -> None:
+        import subprocess
+        script = Path(__file__).resolve().parent.parent / "install.sh"
+        r = subprocess.run(["bash", str(script), "--help"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("model-scanner", r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
